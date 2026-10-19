@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Single Signal and GPS Map</title>
+<style>
+:root{--bg:#e9edf1;--panel:#fff;--ink:#18232f;--muted:#5b6876;--line:#cfd6de;--road:#9aa6b2;--map:#f4f6f8;--green:#1b8a4b;--red:#c93c3c;--amber:#c98a0a;--blue:#2459a6;--car:#2d3b4a;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#141b22;--panel:#1d262f;--ink:#e8edf2;--muted:#9aa7b4;--line:#33404c;--road:#4a5866;--map:#182029;--green:#3ec97b;--red:#ef6b6b;--amber:#e8b43a;--blue:#6ea3f0;--car:#c9d4df;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#141b22;--panel:#1d262f;--ink:#e8edf2;--muted:#9aa7b4;--line:#33404c;--road:#4a5866;--map:#182029;--green:#3ec97b;--red:#ef6b6b;--amber:#e8b43a;--blue:#6ea3f0;--car:#c9d4df;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.45}
+main{max-width:1100px;margin:0 auto;padding:clamp(12px,3vw,28px)}
+h1{font-size:clamp(1.4rem,4.5vw,2.1rem);margin:0 0 10px;line-height:1.1}
+.tabs{display:flex;gap:8px;margin-bottom:12px}
+.tabs button[aria-pressed="true"]{background:var(--blue);border-color:var(--blue);color:#fff}
+.wrap{display:grid;grid-template-columns:1fr;gap:14px}
+@media(min-width:860px){.wrap{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr)}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
+canvas{width:100%;aspect-ratio:1/1;display:block;background:var(--map);border-radius:8px;touch-action:manipulation}
+.row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;align-items:center}
+button,select{font:inherit;font-weight:600;padding:10px 14px;min-height:44px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer}
+button.emg{background:var(--red);border-color:var(--red);color:#fff}
+button.go{background:var(--green);border-color:var(--green);color:#fff}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
+label{font-size:.9rem;color:var(--muted);display:flex;gap:8px;align-items:center;flex:1 1 180px}
+input[type=range]{flex:1;min-width:80px}
+h2{font-size:1rem;margin:12px 0 6px}
+.state{font-weight:700;font-size:1.1rem;padding:8px 10px;border-radius:8px;background:var(--bg)}
+.lane{display:flex;gap:8px;align-items:center;margin-bottom:6px}
+.lane b{width:56px;font-size:.85rem;color:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:4px;min-height:26px;flex:1}
+.chip{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:1px 7px;font-size:.8rem}
+.chip.e{border-color:var(--red);color:var(--red);font-weight:700}
+.stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px}
+.stat{background:var(--bg);border-radius:8px;padding:6px 8px}
+.stat b{display:block;font-size:1.2rem}
+.stat span{font-size:.75rem;color:var(--muted)}
+.small{font-size:.88rem;color:var(--muted);margin:6px 0 0}
+.msg{font-weight:600;min-height:1.4em;margin:6px 0}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+<h1>Traffic Signal and GPS Map</h1>
+<div class="tabs">
+  <button id="t1" aria-pressed="true">Single signal</button>
+  <button id="t2" aria-pressed="false">GPS map</button>
+</div>
+
+<!-- ============ TAB 1: SINGLE SIGNAL ============ -->
+<section id="p1" class="wrap">
+  <div class="card"><canvas id="cv1" aria-label="Single junction with traffic signal"></canvas></div>
+  <div class="card">
+    <div class="state" id="sgState">Starting...</div>
+    <div class="row" style="margin-top:10px">
+      <select id="sgDir" aria-label="Approach direction"><option value="0">North</option><option value="1">East</option><option value="2">South</option><option value="3">West</option></select>
+      <button id="sgCar">Add car</button>
+      <button id="sgAmb" class="emg">Send ambulance</button>
+    </div>
+    <div class="row"><label>Traffic <input type="range" id="sgRate" min="0" max="1.5" step="0.1" value="0.5"></label></div>
+    <h2>Lane queues (front of queue first)</h2>
+    <div id="lanes"></div>
+    <h2>Priority queue: next to be served</h2>
+    <div class="chips" id="pqView"></div>
+    <div class="stats">
+      <div class="stat"><b id="sgPass">0</b><span>Cars passed</span></div>
+      <div class="stat"><b id="sgWait">0.0s</b><span>Avg wait</span></div>
+      <div class="stat"><b id="sgPre">0</b><span>Preemptions</span></div>
+    </div>
+    <p class="small">Each approach is a FIFO queue. The controller looks at the front of every queue and serves the highest priority first (ambulance = 1, car = 4). Otherwise it alternates North-South and East-West.</p>
+  </div>
+</section>
+
+<!-- ============ TAB 2: GPS MAP ============ -->
+<section id="p2" class="wrap" hidden>
+  <div class="card"><canvas id="cv2" aria-label="City map for GPS routing"></canvas></div>
+  <div class="card">
+    <div class="row">
+      <label>From <select id="gFrom"></select></label>
+      <label>To <select id="gTo"></select></label>
+    </div>
+    <div class="row"><label>Method
+      <select id="gAlg"><option value="dij">Shortest path (priority queue)</option><option value="dfs">Stack backtracking (DFS)</option></select></label></div>
+    <div class="row">
+      <button id="gFind" class="go">Find route</button>
+      <button id="gTrip">Start trip</button>
+      <button id="gBack">Back (undo route)</button>
+      <button id="gClear">Reopen all roads</button>
+    </div>
+    <div class="msg" id="gMsg">Choose places and tap Find route. Tap a road on the map to close it.</div>
+    <div class="stats">
+      <div class="stat"><b id="gKm">-</b><span>Distance</span></div>
+      <div class="stat"><b id="gEta">-</b><span>ETA at 40 km/h</span></div>
+      <div class="stat"><b id="gRe">0</b><span>Reroutes</span></div>
+    </div>
+    <h2>Route</h2><div class="chips" id="gRoute"></div>
+    <h2>Search order (nodes explored)</h2><div class="chips" id="gOrder"></div>
+    <h2>Route history (stack, newest first)</h2><div class="chips" id="gHist"></div>
+    <p class="small">Start a trip, then close a road on the car's path: the GPS reroutes from the next junction.</p>
+  </div>
+</section>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+class Heap{constructor(){this.a=[]}push(k,v){const a=this.a;a.push([k,v]);let i=a.length-1;while(i){const p=(i-1)>>1;if(a[p][0]<=a[i][0])break;[a[p],a[i]]=[a[i],a[p]];i=p}}
+pop(){const a=this.a,t=a[0],l=a.pop();if(a.length){a[0]=l;let i=0;for(;;){let m=i,L=2*i+1,R=L+1;if(L<a.length&&a[L][0]<a[m][0])m=L;if(R<a.length&&a[R][0]<a[m][0])m=R;if(m===i)break;[a[m],a[i]]=[a[i],a[m]];i=m}}return t}
+get size(){return this.a.length}}
+function setup(cv){const d=window.devicePixelRatio||1,w=cv.clientWidth||600;cv.width=w*d;cv.height=w*d;const x=cv.getContext("2d");x.setTransform(d,0,0,d,0,0);return w}
+function chip(parent,text,cls){const s=document.createElement("span");s.className="chip "+(cls||"");s.textContent=text;parent.appendChild(s)}
+function fill(el,items,empty){el.textContent="";if(!items.length){chip(el,empty);return}items.forEach(i=>chip(el,i.t,i.c))}
+
+/* ================= SINGLE SIGNAL ================= */
+const cv1=$("cv1"),c1=cv1.getContext("2d");let W1=600;
+const DN=["North","East","South","West"];
+const HD=[[0,1],[-1,0],[0,-1],[1,0]];            // heading of cars coming from N,E,S,W
+const ST=[[.5,0],[1,.5],[.5,1],[0,.5]];          // start point (fraction of size)
+const axis=d=>d%2===0?0:1;                       // 0 = North-South, 1 = East-West
+const SG={a:[[],[],[],[]],ph:0,t:0,clear:0,next:0,pass:0,wait:0,pre:0,spawn:0};
+const STOP=.38,GAP=.07;
+function sgAdd(d,e){const q=SG.a[d];if(q.length&&q[q.length-1].s<GAP+.01)return false;q.push({s:0,e,w:0});return true}
+function sgStep(dt){
+  // priority queue of requests (lowest number = most urgent)
+  const hp=new Heap();
+  SG.a.forEach((q,d)=>{q.forEach(c=>{if(c.e&&c.s>.08&&c.s<STOP+.1)hp.push(1,d)});if(q[0]&&q[0].s<STOP+.02&&q[0].s>.2)hp.push(q[0].e?1:4,d)});
+  const top=hp.size?hp.a[0]:null,emg=top&&top[0]===1;
+  if(SG.clear>0){SG.clear-=dt;if(SG.clear<=0){SG.ph=SG.next;SG.t=0}}
+  else if(emg&&axis(top[1])!==SG.ph){SG.clear=1.2;SG.next=axis(top[1]);SG.pre++}
+  else if(emg){SG.t=0}
+  else{SG.t+=dt;if(SG.t>6){SG.clear=1.2;SG.next=1-SG.ph}}
+  SG.green=SG.clear<=0;
+  SG.a.forEach((q,d)=>{const g=SG.green&&axis(d)===SG.ph;
+    q.forEach((c,i)=>{const v=c.e?.3:.22;let lim=Infinity;
+      if(i)lim=q[i-1].s-GAP;else if(!g&&c.s<=STOP+.005)lim=STOP;
+      const np=Math.min(c.s+v*dt,lim);if(np-c.s<.0005)c.w+=dt;c.s=Math.max(c.s,np)});
+    while(q.length&&q[0].s>=1){const c=q.shift();SG.pass++;SG.wait+=c.w}});
+  SG.spawn-=dt;const r=+$("sgRate").value;if(r>0&&SG.spawn<=0){sgAdd(Math.floor(Math.random()*4),false);SG.spawn=(1/r)*(.6+Math.random()*.8)}
+  SG.top=top}
+function sgDraw(){
+  const W=W1,c=W/2,hw=W*.08,ctx=c1;ctx.clearRect(0,0,W,W);
+  ctx.fillStyle=css("--road");ctx.fillRect(c-hw,0,hw*2,W);ctx.fillRect(0,c-hw,W,hw*2);
+  ctx.strokeStyle=css("--map");ctx.lineWidth=2;ctx.setLineDash([10,10]);
+  ctx.beginPath();ctx.moveTo(c,0);ctx.lineTo(c,c-hw);ctx.moveTo(c,c+hw);ctx.lineTo(c,W);ctx.moveTo(0,c);ctx.lineTo(c-hw,c);ctx.moveTo(c+hw,c);ctx.lineTo(W,c);ctx.stroke();ctx.setLineDash([]);
+  const t=performance.now();
+  SG.a.forEach((q,d)=>{const [hx,hy]=HD[d],rx=-hy,ry=hx,g=SG.green&&axis(d)===SG.ph,off=W*.04;
+    // signal light just before the stop line, on the driver's right side
+    const sx=ST[d][0]*W+hx*(STOP+.03)*W+rx*hw*1.25,sy=ST[d][1]*W+hy*(STOP+.03)*W+ry*hw*1.25;
+    ctx.fillStyle=g?css("--green"):css("--red");ctx.beginPath();ctx.arc(sx,sy,W*.018,0,7);ctx.fill();
+    q.forEach(cr=>{const x=ST[d][0]*W+hx*cr.s*W+rx*off,y=ST[d][1]*W+hy*cr.s*W+ry*off;
+      ctx.save();ctx.translate(x,y);ctx.rotate(Math.atan2(hy,hx));
+      ctx.fillStyle=cr.e?(Math.floor(t/200)%2?css("--red"):css("--blue")):css("--car");
+      ctx.fillRect(-W*.0175,-W*.011,W*.035,W*.022);ctx.restore()})});
+  ctx.fillStyle=css("--ink");ctx.font=W*.032+"px system-ui";ctx.textAlign="center";
+  ctx.fillText("N",c,W*.04);ctx.fillText("S",c,W*.985);ctx.fillText("W",W*.02,c+W*.01);ctx.fillText("E",W*.98,c+W*.01)}
+function sgUi(){
+  $("sgState").textContent=SG.clear>0?"ALL RED (clearing junction)":(SG.ph===0?"North-South GREEN":"East-West GREEN")+(SG.top&&SG.top[0]===1?"  | emergency preemption":"");
+  const L=$("lanes");L.textContent="";
+  SG.a.forEach((q,d)=>{const r=document.createElement("div");r.className="lane";const b=document.createElement("b");b.textContent=DN[d];r.appendChild(b);
+    const ch=document.createElement("div");ch.className="chips";const w=q.filter(c=>c.s<STOP+.02);
+    if(!w.length)chip(ch,"empty");else w.forEach(c=>chip(ch,c.e?"Ambulance":"Car",c.e?"e":""));r.appendChild(ch);L.appendChild(r)});
+  const hp=new Heap();SG.a.forEach((q,d)=>{if(q[0]&&q[0].s<STOP+.02&&q[0].s>.15)hp.push(q[0].e?1:4,d)});
+  const items=[];while(hp.size){const [k,d]=hp.pop();items.push({t:DN[d]+": "+(k===1?"Ambulance":"Car")+" (P"+k+")",c:k===1?"e":""})}
+  fill($("pqView"),items,"No vehicles waiting");
+  $("sgPass").textContent=SG.pass;$("sgWait").textContent=(SG.pass?SG.wait/SG.pass:0).toFixed(1)+"s";$("sgPre").textContent=SG.pre}
+$("sgCar").onclick=()=>sgAdd(+$("sgDir").value,false);
+$("sgAmb").onclick=()=>sgAdd(+$("sgDir").value,true);
+
+/* ================= GPS MAP ================= */
+const cv2=$("cv2"),c2=cv2.getContext("2d");let W2=600;
+const PL=[["Home",10,80],["School",10,45],["Market",35,65],["Station",35,25],["Hospital",55,45],["Bridge",60,80],["Mall",80,60],["Park",65,15],["Office",90,25],["Airport",90,88]];
+const RD=[[0,1],[0,2],[1,3],[1,2],[2,4],[2,5],[3,4],[3,7],[4,6],[4,7],[5,6],[5,9],[6,8],[6,9],[7,8],[4,5]]
+  .map(([a,b])=>({a,b,km:Math.hypot(PL[a][1]-PL[b][1],PL[a][2]-PL[b][2])*.25,blocked:false}));
+const adj=PL.map(()=>[]);RD.forEach(r=>{adj[r.a].push([r.b,r]);adj[r.b].push([r.a,r])});
+const GP={route:null,order:[],hist:[],trip:null,re:0};
+PL.forEach((p,i)=>{["gFrom","gTo"].forEach((id,k)=>{const o=document.createElement("option");o.value=i;o.textContent=p[0];$(id).appendChild(o)})});
+$("gFrom").value=0;$("gTo").value=9;
+function dij(s,t){const d=Array(PL.length).fill(1e9),pv=Array(PL.length).fill(-1),h=new Heap(),order=[];d[s]=0;h.push(0,s);
+  while(h.size){const [k,u]=h.pop();if(k>d[u])continue;order.push(u);if(u===t)break;
+    for(const [v,r] of adj[u]){if(r.blocked)continue;const w=k+r.km;if(w<d[v]){d[v]=w;pv[v]=u;h.push(w,v)}}}
+  if(d[t]>=1e9)return {path:null,order};const p=[];for(let u=t;u!==-1;u=pv[u])p.push(u);return {path:p.reverse(),order}}
+function dfs(s,t){const st=[[s]],order=[];
+  while(st.length){const p=st.pop(),u=p[p.length-1];order.push(u);if(u===t)return {path:p,order};
+    for(const [v,r] of adj[u]){if(r.blocked||p.includes(v))continue;st.push([...p,v])}}
+  return {path:null,order}}
+const solve=(s,t)=>($("gAlg").value==="dij"?dij:dfs)(s,t);
+const pathKm=p=>{let k=0;for(let i=0;i+1<p.length;i++)k+=edge(p[i],p[i+1]).km;return k};
+const edge=(a,b)=>RD.find(r=>(r.a===a&&r.b===b)||(r.a===b&&r.b===a));
+function msg(t){$("gMsg").textContent=t}
+function find(push){const s=+$("gFrom").value,t=+$("gTo").value;
+  if(s===t){msg("Pick two different places.");return}
+  const r=solve(s,t);GP.order=r.order;GP.route=r.path;
+  if(!r.path){msg("No route available. Roads are closed.");}
+  else{msg("Route found.");if(push)GP.hist.push(r.path)}
+  gUi()}
+function gUi(){const p=GP.route;
+  $("gKm").textContent=p?pathKm(p).toFixed(1)+" km":"-";$("gEta").textContent=p?Math.round(pathKm(p)/40*60)+" min":"-";$("gRe").textContent=GP.re;
+  fill($("gRoute"),p?p.map(i=>({t:PL[i][0]})):[],"No route yet");
+  fill($("gOrder"),GP.order.map((i,n)=>({t:(n+1)+". "+PL[i][0]})),"None");
+  fill($("gHist"),GP.hist.slice().reverse().map(h=>({t:h.map(i=>PL[i][0]).join(" > ")})),"Empty")}
+$("gFind").onclick=()=>{GP.trip=null;find(true)};
+$("gBack").onclick=()=>{if(!GP.hist.length){msg("Nothing to undo.");return}GP.hist.pop();GP.trip=null;GP.route=GP.hist.length?GP.hist[GP.hist.length-1]:null;GP.order=[];msg("Last route removed.");gUi()};
+$("gClear").onclick=()=>{RD.forEach(r=>r.blocked=false);if(GP.trip)reroute();else if(GP.route)find(false);msg("All roads reopened.")};
+$("gTrip").onclick=()=>{find(true);if(!GP.route)return;GP.trip={path:GP.route.slice(),i:0,p:0,dest:+$("gTo").value};msg("Trip started. Close a road on the path to test rerouting.")};
+function reroute(){const T=GP.trip;if(!T)return;
+  const n=T.path[Math.min(T.i+1,T.path.length-1)];if(n===T.dest)return;
+  const r=solve(n,T.dest);GP.order=r.order;
+  if(!r.path){T.path=T.path.slice(0,T.i+2);T.stuck=true;msg("No route from next junction. Waiting.");gUi();return}
+  const np=T.path.slice(0,T.i+1).concat(r.path);
+  if(JSON.stringify(np)!==JSON.stringify(T.path)){GP.re++;msg("Road closed ahead. Rerouted from "+PL[n][0]+".")}
+  T.path=np;T.stuck=false;GP.route=T.path;gUi()}
+function gStep(dt){const T=GP.trip;if(!T)return;
+  if(T.i+1>=T.path.length){if(T.path[T.path.length-1]===T.dest){msg("Arrived at "+PL[T.dest][0]+".");GP.trip=null}return}
+  const a=T.path[T.i],b=T.path[T.i+1],e=edge(a,b);
+  if(T.stuck&&T.p>=1){reroute();return}
+  T.p+=14*dt/(Math.hypot(PL[a][1]-PL[b][1],PL[a][2]-PL[b][2])||1);
+  if(T.p>=1){T.i++;T.p=0;if(T.i+1<T.path.length){const ne=edge(T.path[T.i],T.path[T.i+1]);if(ne.blocked)reroute()}}}
+function gDraw(){const W=W2,ctx=c2,X=v=>v/100*W*.8+W*.1,ink=css("--ink"),rd=css("--red"),bl=css("--blue"),T=GP.trip;
+  ctx.clearRect(0,0,W,W);ctx.lineCap="round";
+  const onRoute=r=>GP.route&&GP.route.some((u,i)=>i+1<GP.route.length&&((u===r.a&&GP.route[i+1]===r.b)||(u===r.b&&GP.route[i+1]===r.a)));
+  RD.forEach(r=>{const [,x1,y1]=PL[r.a],[,x2,y2]=PL[r.b];
+    ctx.strokeStyle=r.blocked?rd:onRoute(r)?bl:css("--road");ctx.lineWidth=onRoute(r)?W*.016:W*.01;ctx.setLineDash(r.blocked?[6,6]:[]);
+    ctx.beginPath();ctx.moveTo(X(x1),X(y1));ctx.lineTo(X(x2),X(y2));ctx.stroke();ctx.setLineDash([]);
+    const mx=X((x1+x2)/2),my=X((y1+y2)/2);ctx.fillStyle=r.blocked?rd:css("--muted");ctx.font=(r.blocked?"bold ":"")+W*.027+"px system-ui";ctx.textAlign="center";
+    ctx.fillText(r.blocked?"X closed":r.km.toFixed(1),mx,my-W*.008)});
+  PL.forEach(([n,x,y],i)=>{const f=i===+$("gFrom").value,t=i===+$("gTo").value;
+    ctx.fillStyle=f?css("--green"):t?css("--amber"):css("--panel");ctx.strokeStyle=ink;ctx.lineWidth=2;ctx.beginPath();ctx.arc(X(x),X(y),W*.018,0,7);ctx.fill();ctx.stroke();
+    ctx.fillStyle=ink;ctx.font="600 "+W*.03+"px system-ui";ctx.textAlign="center";ctx.fillText(n,X(x),X(y)-W*.03)});
+  if(T&&T.i+1<T.path.length){const a=PL[T.path[T.i]],b=PL[T.path[T.i+1]],x=X(a[1]+(b[1]-a[1])*T.p),y=X(a[2]+(b[2]-a[2])*T.p);
+    ctx.fillStyle=bl;ctx.strokeStyle="#fff";ctx.lineWidth=3;ctx.beginPath();ctx.arc(x,y,W*.014,0,7);ctx.fill();ctx.stroke()}}
+cv2.addEventListener("pointerdown",ev=>{const r=cv2.getBoundingClientRect(),mx=(ev.clientX-r.left)*W2/r.width,my=(ev.clientY-r.top)*W2/r.height,X=v=>v/100*W2*.8+W2*.1;
+  let best=null,bd=W2*.04;
+  RD.forEach(rd=>{const [,x1,y1]=PL[rd.a],[,x2,y2]=PL[rd.b],ax=X(x1),ay=X(y1),dx=X(x2)-ax,dy=X(y2)-ay;
+    const u=Math.max(0,Math.min(1,((mx-ax)*dx+(my-ay)*dy)/(dx*dx+dy*dy))),d=Math.hypot(mx-ax-u*dx,my-ay-u*dy);if(d<bd){bd=d;best=rd}});
+  if(!best)return;best.blocked=!best.blocked;
+  if(GP.trip)reroute();else if(GP.route){const s=+$("gFrom").value,t=+$("gTo").value;const r=solve(s,t);GP.route=r.path;GP.order=r.order;msg(r.path?"Road "+(best.blocked?"closed":"reopened")+". Route updated.":"No route available.");gUi()}
+  else msg("Road "+(best.blocked?"closed":"reopened")+".")});
+
+/* ================= tabs + loop ================= */
+let tab=1;
+function show(n){tab=n;$("p1").hidden=n!==1;$("p2").hidden=n!==2;$("t1").setAttribute("aria-pressed",n===1);$("t2").setAttribute("aria-pressed",n===2);fit()}
+function fit(){if(tab===1)W1=setup(cv1);else W2=setup(cv2)}
+$("t1").onclick=()=>show(1);$("t2").onclick=()=>show(2);window.addEventListener("resize",fit);
+let last=performance.now(),ut=0;
+function loop(now){const dt=Math.min(.1,(now-last)/1000);last=now;
+  if(tab===1){sgStep(dt);sgDraw();ut-=dt;if(ut<=0){sgUi();ut=.25}}else{gStep(dt);gDraw()}
+  requestAnimationFrame(loop)}
+fit();gUi();for(let i=0;i<3;i++)sgAdd(i,false);requestAnimationFrame(loop);
+</script>
+</body>
+</html>

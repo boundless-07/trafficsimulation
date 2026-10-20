@@ -254,13 +254,32 @@ footer{margin-top:28px;color:var(--muted);font-size:13px;max-width:72ch}
 @media (prefers-reduced-motion:reduce){
   .map .flow,.k-amb::after,.k-fire::after{animation:none}
 }
+
+/* incident desk */
+.inc-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;align-items:start}
+.inc-form{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.inc-form .full{grid-column:1/-1}
+.iq{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.iq li{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font:500 13px/1.4 var(--font-mono)}
+.iq li small{display:block;color:var(--muted);font-size:12px}
+.iq .tag{font:600 11px var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--accent);display:block}
+.iq li.first{border-color:var(--accent);background:var(--accent-soft)}
+.iq li.last{border-style:dashed}
+.iq .empty{color:var(--muted);border-style:dashed;justify-content:center}
+.units{display:grid;gap:8px}
+.unit{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--bg)}
+.unit.busy{border-color:var(--warn)}
+.unit b{font:600 16px var(--font-display);letter-spacing:.05em;text-transform:uppercase}
+.unit span{font:500 13px var(--font-mono);color:var(--muted)}
+.unit.busy span{color:var(--fg)}
+@media (max-width:760px){.inc-grid{grid-template-columns:1fr}}
 </style>
 
 <div class="wrap">
   <header class="top">
     <div>
       <h1>Smart City Traffic Control</h1>
-      <p>Four one-way lanes, one signal you control, a route finder with twelve locations, and a parking lot at every location. Every part runs on a queue, a priority queue or a stack.</p>
+      <p>Four one-way lanes, one signal you control, a route finder with twelve locations, and a parking lot at every location, and an incident desk. Every part runs on a queue, a priority queue or a stack.</p>
     </div>
     <div class="top-actions">
       <button class="btn" data-act="reset" type="button">Reset sample data</button>
@@ -272,6 +291,7 @@ footer{margin-top:28px;color:var(--muted);font-size:13px;max-width:72ch}
     <button class="tab" role="tab" id="t-junction" aria-selected="true" aria-controls="tab-junction" data-act="tab" data-tab="junction" type="button"><b>Junction</b><span>Queues + priority queue</span></button>
     <button class="tab" role="tab" id="t-gps" aria-selected="false" aria-controls="tab-gps" data-act="tab" data-tab="gps" type="button"><b>Route finder</b><span>Priority queue + stack</span></button>
     <button class="tab" role="tab" id="t-park" aria-selected="false" aria-controls="tab-park" data-act="tab" data-tab="park" type="button"><b>Parking lots</b><span>Queue at each place</span></button>
+    <button class="tab" role="tab" id="t-inc" aria-selected="false" aria-controls="tab-inc" data-act="tab" data-tab="inc" type="button"><b>Incident desk</b><span>Queue + stack</span></button>
   </div>
 
   <!-- 1. JUNCTION -->
@@ -402,7 +422,51 @@ footer{margin-top:28px;color:var(--muted);font-size:13px;max-width:72ch}
     <div class="panel" style="margin-top:20px"><h2>Activity</h2><ol class="log" id="log-park"></ol></div>
   </section>
 
-  <footer>Logic follows traffic_menu.cpp: <code>queue</code> for the lanes and the parking waitlist, <code>priority_queue</code> ordered by priority then arrival for Lane 4, and a <code>stack</code> for route search and route history. Vehicles shown at the start are sample data.</footer>
+  <!-- 4. INCIDENT DESK -->
+  <section id="tab-inc" role="tabpanel" aria-labelledby="t-inc" hidden>
+    <div class="panel" style="margin-bottom:20px">
+      <h2>Incident desk</h2>
+      <p class="dsnote">Reported incidents join a FIFO queue: the oldest report is dispatched first. A free patrol unit takes the front of the queue. When a unit resolves its incident, the incident is pushed onto a stack, so the latest resolved case is on top. "Reopen last" pops that stack and puts the incident at the back of the queue again.</p>
+      <div class="psum" id="i-sum"></div>
+    </div>
+    <div class="inc-grid">
+      <div class="mainc">
+        <div class="panel">
+          <h2>Report an incident</h2>
+          <div class="inc-form">
+            <div><label class="lbl" for="i-type">Type</label>
+              <select id="i-type"><option>Accident</option><option>Breakdown</option><option>Road work</option><option>Signal fault</option><option>Flooding</option></select></div>
+            <div><label class="lbl" for="i-loc">Location</label><select id="i-loc"></select></div>
+          </div>
+          <div class="btns">
+            <button class="btn primary" data-act="i-report" type="button">Report incident (enqueue)</button>
+            <button class="btn" data-act="i-random" type="button">Report random incident</button>
+          </div>
+          <label class="toggle" style="margin-top:10px"><input type="checkbox" id="i-auto"> Auto-dispatch when a unit is free</label>
+        </div>
+        <div class="panel">
+          <h2>Waiting queue (front = next)</h2>
+          <ol class="iq" id="i-queue"></ol>
+        </div>
+        <div class="panel"><h2>Activity</h2><ol class="log" id="log-inc"></ol></div>
+      </div>
+      <div class="mainc">
+        <div class="panel">
+          <h2>Patrol units</h2>
+          <div class="units" id="i-units"></div>
+          <div class="btns" style="margin-top:12px"><button class="btn go" data-act="i-dispatch" type="button">Dispatch next (dequeue)</button></div>
+          <span class="err" id="i-err" aria-live="polite"></span>
+        </div>
+        <div class="panel">
+          <h2>Resolved cases (stack)</h2>
+          <ol class="iq" id="i-stack"></ol>
+          <div class="btns" style="margin-top:12px"><button class="btn" data-act="i-reopen" type="button">Reopen last (pop, back to queue)</button></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>Logic follows traffic_menu.cpp: <code>queue</code> for the lanes and the parking waitlist, <code>priority_queue</code> ordered by priority then arrival for Lane 4, a <code>stack</code> for route search and route history, and a <code>queue</code> plus a <code>stack</code> for the incident desk. Vehicles shown at the start are sample data.</footer>
 </div>
 
 <script>
@@ -426,7 +490,7 @@ var lanes = [[], [], []];        // three regular lanes, each a queue of {id,nam
 var pq = [];                     // Lane 4: priority queue kept in service order {id,name,priority,order}
 var sig = { phase:'red', t:0, preempted:false };
 var acc = [0, 0, 0, 0];
-var logs = { junction:[], gps:[], park:[] };
+var logs = { junction:[], gps:[], park:[], inc:[] };
 var lots = [];             // one parking lot per location: {parked:[], waiting:[]}
 
 function mkCar(n){ var id = ++uid; return { id:id, name:n, color:CAR_COLORS[id % CAR_COLORS.length] }; }
@@ -980,22 +1044,89 @@ function parkRandomAll(){
   renderPark();
 }
 
+/* =====================================================================
+   INCIDENT DESK: a FIFO queue of reports, patrol units, and a stack of resolved cases
+   ===================================================================== */
+var iq = [], idone = [], iunits = [null, null, null], iid = 0;
+var ITYPES = ['Accident', 'Breakdown', 'Road work', 'Signal fault', 'Flooding'];
+function incText(x){ return '#' + x.id + ' ' + x.type + ' at ' + PL[x.loc].n; }
+function incReport(type, loc){
+  var x = { id:++iid, type:type, loc:loc };
+  iq.push(x);
+  log('inc', 'Reported ' + incText(x) + '. Queue length: ' + iq.length + '.', '');
+  incAuto(); renderInc();
+}
+function incDispatch(manual){
+  var u = iunits.indexOf(null);
+  if (!iq.length){ if (manual) $('#i-err').textContent = 'The queue is empty.'; return false; }
+  if (u < 0){ if (manual) $('#i-err').textContent = 'All patrol units are busy. Resolve a case first.'; return false; }
+  $('#i-err').textContent = '';
+  var x = iq.shift();
+  iunits[u] = x;
+  log('inc', 'Unit ' + (u + 1) + ' dispatched to ' + incText(x) + '.', 'ok');
+  return true;
+}
+function incAuto(){ if ($('#i-auto').checked) while (incDispatch(false)){} }
+function incResolve(u){
+  var x = iunits[u]; if (!x) return;
+  iunits[u] = null;
+  idone.push(x);
+  log('inc', 'Unit ' + (u + 1) + ' resolved ' + incText(x) + '. Pushed on the stack.', 'ok');
+  incAuto(); renderInc();
+}
+function incReopen(){
+  if (!idone.length){ $('#i-err').textContent = 'The stack is empty.'; return; }
+  $('#i-err').textContent = '';
+  var x = idone.pop();
+  iq.push(x);
+  log('inc', 'Reopened ' + incText(x) + ': popped from the stack, back of the queue.', 'dim');
+  incAuto(); renderInc();
+}
+function incList(items, emptyText, topTag, botTag, lastIsTop){
+  if (!items.length) return '<li class="empty">' + emptyText + '</li>';
+  return items.map(function(x, i){
+    var tag = i === 0 ? topTag : (i === items.length - 1 ? botTag : '');
+    return '<li class="' + (i === 0 ? 'first' : (i === items.length - 1 ? 'last' : '')) + '"><div>'
+      + (tag ? '<span class="tag">' + tag + '</span>' : '') + esc(x.type) + '<small>' + esc(PL[x.loc].n) + '</small></div><span>#' + x.id + '</span></li>';
+  }).join('');
+}
+function renderInc(){
+  $('#i-queue').innerHTML = incList(iq, 'Queue is empty', 'Front (next out)', 'Back (newest)');
+  $('#i-stack').innerHTML = incList(idone.slice().reverse(), 'Stack is empty', 'Top (last resolved)', 'Bottom');
+  $('#i-units').innerHTML = iunits.map(function(x, u){
+    return '<div class="unit' + (x ? ' busy' : '') + '"><div><b>Unit ' + (u + 1) + '</b><br><span>' + (x ? esc(incText(x)) : 'Idle') + '</span></div>'
+      + (x ? '<button class="btn sm" data-act="i-resolve" data-u="' + u + '" type="button">Resolve</button>' : '') + '</div>';
+  }).join('');
+  var busy = iunits.filter(Boolean).length;
+  $('#i-sum').textContent = 'Waiting: ' + iq.length + '.  Units busy: ' + busy + ' of ' + iunits.length + '.  Resolved (stack size): ' + idone.length + '.';
+}
+function incSeed(){
+  iq = []; idone = []; iunits = [null, null, null]; iid = 0;
+  [['Accident', 6], ['Signal fault', 3], ['Breakdown', 9], ['Flooding', 1]].forEach(function(a){ iq.push({ id:++iid, type:a[0], loc:a[1] }); });
+  iunits[0] = iq.shift();
+  idone.push({ id:++iid, type:'Road work', loc:4 });
+}
+function incInit(){
+  $('#i-loc').innerHTML = PL.map(function(p, i){ return '<option value="' + i + '">' + esc(p.n) + '</option>'; }).join('');
+}
+
 /* ---------- reset ---------- */
 function resetAll(sample){
   cancelRun();
   lanes = [[], [], []]; pq = []; order = 0; passed = 0;
   lots = newLots(); blockedE = {}; hist = []; curRoute = []; view = null;
-  logs = { junction:[], gps:[], park:[] };
+  logs = { junction:[], gps:[], park:[], inc:[] };
+  iq = []; idone = []; iunits = [null, null, null]; iid = 0; $('#i-err').textContent = '';
   sig.phase = 'red'; sig.t = 0; sig.preempted = false; acc = [0, 0, 0, 0];
   if (sample){
     lanes[0] = ['MH01-4521', 'MH02-7788'].map(mkCar);
     lanes[1] = ['MH04-1290'].map(mkCar);
     lanes[2] = ['MH03-5516', 'MH12-8890'].map(mkCar);
     pqPush(3, 'Bus 502'); pqPush(1, 'Ambulance'); pqPush(2, 'Fire truck');
-    seedLots();
+    seedLots(); incSeed();
   }
-  ['junction', 'gps', 'park'].forEach(renderLog);
-  renderLanes(); renderSignal(); renderPark();
+  ['junction', 'gps', 'park', 'inc'].forEach(renderLog);
+  renderLanes(); renderSignal(); renderPark(); renderInc();
   $('#g-from').value = 0; $('#g-to').value = 10;
   $('#g-state').innerHTML = '<p class="note" style="margin-top:0">Press "Find route" to see the queue or stack at every step.</p>';
   $('#routebox').textContent = 'No route yet.';
@@ -1011,7 +1142,7 @@ function resetAll(sample){
 
 /* ---------- events ---------- */
 function showTab(name){
-  ['junction', 'gps', 'park'].forEach(function(t){
+  ['junction', 'gps', 'park', 'inc'].forEach(function(t){
     $('#tab-' + t).hidden = (t !== name);
     $('#t-' + t).setAttribute('aria-selected', t === name ? 'true' : 'false');
   });
@@ -1037,7 +1168,13 @@ document.addEventListener('click', function(e){
   else if (a === 'p-arrive') parkArrive(parseInt(b.getAttribute('data-lot'), 10));
   else if (a === 'p-leave') parkLeave(parseInt(b.getAttribute('data-lot'), 10), parseInt(b.getAttribute('data-i'), 10));
   else if (a === 'p-random-all') parkRandomAll();
+  else if (a === 'i-report') incReport($('#i-type').value, parseInt($('#i-loc').value, 10));
+  else if (a === 'i-random') incReport(ITYPES[Math.floor(Math.random() * ITYPES.length)], Math.floor(Math.random() * PL.length));
+  else if (a === 'i-dispatch'){ incDispatch(true); renderInc(); }
+  else if (a === 'i-resolve') incResolve(parseInt(b.getAttribute('data-u'), 10));
+  else if (a === 'i-reopen') incReopen();
 });
+$('#i-auto').addEventListener('change', function(){ incAuto(); renderInc(); });
 $('#map').addEventListener('click', function(e){
   var t = e.target.closest('[data-edge]');
   if (t){ $('#g-road').value = t.getAttribute('data-edge'); toggleBlock(t.getAttribute('data-edge')); }
@@ -1055,6 +1192,7 @@ $('#lots').addEventListener('input', function(e){
 $('#pre').addEventListener('change', maybePreempt);
 
 initGpsControls();
+incInit();
 buildLots();
 resetAll(true);
 })();

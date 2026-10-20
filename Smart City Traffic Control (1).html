@@ -1,0 +1,1063 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Smart City Traffic Control</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Layout: control-room console. Header and tab strip on top; each tab is a two-column workspace
+   (the live picture on the left, controls and an activity log on the right). */
+:root{
+  --font-display:"Barlow Condensed","Arial Narrow",Arial,sans-serif;
+  --font-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+
+  --bg:#edf0f3; --surface:#fbfcfd; --surface-2:#e3e8ed; --line:#ccd3db;
+  --fg:#161c24; --muted:#596574;
+  --accent:#1b5fb5; --accent-fg:#ffffff; --accent-soft:#d6e5f8;
+  --good:#1b7f47; --warn:#9a6409; --bad:#c23b32;
+
+  --road:#2a2e35; --road-edge:#1d2025; --paint:#ebe8da; --paint-dim:rgba(235,232,218,.35);
+  --housing:#101215; --lamp-off:#3b4048;
+  --lamp-red:#e8483c; --lamp-amber:#f2b52b; --lamp-green:#34c46a;
+  --veh-bus:#e3a826; --veh-fire:#d8471d; --veh-amb:#f5f7f9;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1217; --surface:#161b22; --surface-2:#1f2630; --line:#2b3440;
+    --fg:#e7ebf0; --muted:#97a2b0;
+    --accent:#5ba3f0; --accent-fg:#08111d; --accent-soft:#1a2d45;
+    --good:#45c47c; --warn:#e3b04b; --bad:#f06c60;
+    --road:#13161b; --road-edge:#0a0c0f;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1217; --surface:#161b22; --surface-2:#1f2630; --line:#2b3440;
+  --fg:#e7ebf0; --muted:#97a2b0;
+  --accent:#5ba3f0; --accent-fg:#08111d; --accent-soft:#1a2d45;
+  --good:#45c47c; --warn:#e3b04b; --bad:#f06c60;
+  --road:#13161b; --road-edge:#0a0c0f;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+body{
+  background:var(--bg); color:var(--fg);
+  font:15px/1.5 var(--font-body);
+  padding-block:20px 48px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+}
+.wrap{max-width:1180px;margin:0 auto}
+h1,h2,h3,p{margin:0}
+.muted{color:var(--muted)}
+
+/* header */
+.top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px 24px;margin-bottom:18px}
+.top h1{font:700 clamp(28px,5vw,42px)/1 var(--font-display);letter-spacing:.03em;text-transform:uppercase;text-wrap:balance}
+.top p{color:var(--muted);margin-top:6px;max-width:64ch}
+.top-actions{display:flex;gap:8px;flex-wrap:wrap}
+
+/* tabs */
+.tabs{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:4px;border-bottom:1px solid var(--line);margin-bottom:20px}
+.tab{
+  appearance:none;border:0;border-bottom:3px solid transparent;background:transparent;color:var(--muted);
+  text-align:left;padding:10px 12px 9px;cursor:pointer;display:flex;flex-direction:column;gap:2px;min-width:0
+}
+.tab b{font:600 19px/1.1 var(--font-display);letter-spacing:.05em;text-transform:uppercase}
+.tab span{font:500 12px var(--font-mono)}
+.tab:hover{color:var(--fg)}
+.tab[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--accent);background:var(--surface)}
+
+/* shared pieces */
+.two{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:20px;align-items:start}
+.side,.mainc{display:grid;gap:20px;min-width:0}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:16px;min-width:0}
+.panel h2{font:600 19px/1.2 var(--font-display);letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px}
+.panel h3{font:600 13px/1.2 var(--font-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+.dsnote{color:var(--muted);font-size:14px;max-width:66ch;margin-bottom:14px}
+.hint{color:var(--muted);font-size:13px;margin-top:8px}
+.sect+.sect{margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+label.lbl{display:block;font-size:13px;font-weight:500;margin-bottom:6px}
+input[type="text"],select{
+  width:100%;min-height:42px;padding:0 12px;border-radius:6px;border:1px solid var(--line);
+  background:var(--bg);color:var(--fg);font:500 14px var(--font-mono)
+}
+select{font-family:var(--font-body);font-weight:500}
+input::placeholder{color:var(--muted);opacity:.8}
+.err{display:block;min-height:18px;color:var(--bad);font-size:13px;margin-top:4px}
+.btns{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.btn{
+  font:500 14px var(--font-body);min-height:42px;padding:0 14px;border-radius:6px;border:1px solid var(--line);
+  background:var(--surface);color:var(--fg);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-align:center
+}
+.btn:hover{background:var(--surface-2)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.go{background:var(--good);border-color:var(--good);color:#fff}
+.btn.stop{background:var(--bad);border-color:var(--bad);color:#fff}
+.btn.big{min-height:52px;font-size:16px;font-weight:600}
+.btn.sm{min-height:34px;padding:0 10px;font-size:13px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn .dot{width:10px;height:10px;border-radius:2px;flex:none}
+.btn:focus-visible,input:focus-visible,select:focus-visible,.tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.toggle{display:flex;align-items:center;gap:10px;min-height:36px;cursor:pointer;font-size:14px}
+.toggle input{width:18px;height:18px;accent-color:var(--accent);flex:none}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.radios{display:grid;gap:4px;margin:10px 0 6px}
+
+.log{list-style:none;margin:0;padding:0;max-height:230px;overflow:auto;font:400 12.5px/1.45 var(--font-mono)}
+.log li{padding:5px 0;border-bottom:1px dashed var(--line);overflow-wrap:anywhere}
+.log li:first-child{font-weight:600}
+.log li.alert{color:var(--bad)}
+.log li.ok{color:var(--fg)}
+.log li.dim{color:var(--muted)}
+
+/* vehicles (top-down, front of the vehicle points up the road) */
+.veh{
+  position:relative;flex:none;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:2px;
+  width:100%;max-width:96px;margin:0 auto;padding:14px 4px 5px;border-radius:9px;
+  font:600 10.5px/1.1 var(--font-mono);min-width:0;box-shadow:0 2px 0 rgba(0,0,0,.4);color:#fff
+}
+.veh::before{content:"";position:absolute;top:5px;left:16%;right:16%;height:6px;border-radius:2px;background:rgba(15,25,40,.38)}
+.veh .nm{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.veh .pb{font:600 9.5px var(--font-mono);padding:1px 4px;border-radius:3px;background:rgba(0,0,0,.26)}
+.k-car{height:46px}
+.k-amb{height:54px;background:var(--veh-amb);color:#a3231b;box-shadow:inset 0 -5px 0 #d03a30,0 2px 0 rgba(0,0,0,.4)}
+.k-amb .pb{background:rgba(163,35,27,.14)}
+.k-fire{height:62px;background:var(--veh-fire)}
+.k-bus{height:72px;background:var(--veh-bus);color:#1d1708}
+.k-bus .pb{background:rgba(29,23,8,.18)}
+.k-amb::after,.k-fire::after{
+  content:"";position:absolute;top:-3px;left:50%;width:24px;height:6px;margin-left:-12px;border-radius:3px;
+  background:linear-gradient(90deg,#ff4a3d 50%,#3b82f6 50%);animation:blink .5s steps(2) infinite
+}
+@keyframes blink{50%{filter:brightness(.45)}}
+
+/* intersection */
+.stage-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px 20px;margin-bottom:14px}
+.signal{display:flex;align-items:center;gap:14px}
+.housing{display:flex;gap:8px;background:var(--housing);padding:9px 12px;border-radius:999px;flex:none}
+.lamp{display:block;width:24px;height:24px;border-radius:50%;background:var(--lamp-off)}
+.lamp.r.on{background:var(--lamp-red);box-shadow:0 0 16px var(--lamp-red)}
+.lamp.a.on{background:var(--lamp-amber);box-shadow:0 0 16px var(--lamp-amber)}
+.lamp.g.on{background:var(--lamp-green);box-shadow:0 0 16px var(--lamp-green)}
+.phase{font:700 30px/1 var(--font-display);letter-spacing:.06em}
+.phase.red{color:var(--bad)} .phase.green{color:var(--good)} .phase.amber{color:var(--warn)}
+.phase-sub{font:500 12px var(--font-mono);color:var(--muted);margin-top:3px}
+.passed{font:500 13px var(--font-mono);color:var(--muted)}
+.passed b{font-size:20px;color:var(--fg);margin-right:4px}
+.banner{
+  flex:1 1 100%;order:3;padding:8px 12px;border-radius:6px;background:var(--bad);color:#fff;
+  font:600 13px var(--font-mono);letter-spacing:.04em;text-transform:uppercase
+}
+
+.lane-heads{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:6px}
+.lh{text-align:center;padding:5px 2px;border-radius:5px;min-width:0}
+.lh b{display:block;font:600 15px/1.1 var(--font-display);letter-spacing:.06em;text-transform:uppercase}
+.lh span{display:block;font:500 10.5px/1.3 var(--font-mono);color:var(--muted)}
+.lh.pri b{color:var(--warn)}
+.road{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));background:var(--road);border:1px solid var(--road-edge);border-radius:8px;overflow:hidden;position:relative}
+.lane{position:relative;min-width:0}
+.lane+.lane{border-left:3px dashed var(--paint-dim)}
+.lane-pri{background:repeating-linear-gradient(135deg,transparent 0 16px,rgba(242,181,43,.06) 16px 32px)}
+.exit{height:84px;position:relative}
+.exit::after{content:"";position:absolute;left:50%;bottom:14px;border-left:9px solid transparent;border-right:9px solid transparent;border-bottom:16px solid var(--paint);opacity:.22;transform:translateX(-50%)}
+.exit::before{content:"";position:absolute;left:50%;top:18px;border-left:9px solid transparent;border-right:9px solid transparent;border-bottom:16px solid var(--paint);opacity:.12;transform:translateX(-50%)}
+.stopline{height:6px;margin:0 8px;border-radius:2px;background:var(--lamp-red);transition:background .25s}
+.road.go .stopline{background:var(--lamp-green)}
+.road.amb .stopline{background:var(--lamp-amber)}
+.stack{display:flex;flex-direction:column;gap:8px;padding:10px 8px 14px;min-height:420px}
+.stack .empty,.stack .more{font:500 11px var(--font-mono);color:var(--paint);opacity:.55;padding:6px 2px;text-align:center}
+.ghost{position:absolute;pointer-events:none;z-index:2;margin:0!important;max-width:none!important}
+.readouts{display:grid;gap:4px;margin-top:12px}
+.readout{font:400 12px/1.5 var(--font-mono);color:var(--muted);overflow-wrap:anywhere;min-width:0}
+.readout b{color:var(--fg);font-weight:600}
+
+/* gps */
+.map{width:100%;height:auto;display:block}
+.map .edge{stroke:var(--muted);stroke-width:2.5;fill:none;opacity:.65}
+.map .edge.seen{stroke:var(--accent);stroke-width:3;opacity:.75}
+.map .edge.on{stroke:var(--accent);stroke-width:6;opacity:1}
+.map .edge.blocked{stroke:var(--bad);stroke-width:3.5;stroke-dasharray:7 6;opacity:1}
+.map .hit{stroke:transparent;stroke-width:18;fill:none;cursor:pointer}
+.map .wl{fill:var(--muted);font:500 11px var(--font-mono);text-anchor:middle;dominant-baseline:central;paint-order:stroke;stroke:var(--surface);stroke-width:4px;stroke-linejoin:round;pointer-events:none}
+.map .node{fill:var(--surface);stroke:var(--muted);stroke-width:2}
+.map .node.visited{fill:var(--surface-2)}
+.map .node.front{stroke:var(--accent);stroke-dasharray:4 3;stroke-width:3}
+.map .node.path{fill:var(--accent);stroke:var(--accent)}
+.map .node.cur{fill:var(--accent-soft);stroke:var(--accent);stroke-width:5}
+.map .node.start{stroke:var(--good);stroke-width:5}
+.map .node.dest{stroke:var(--fg);stroke-width:5}
+.map .dl{fill:var(--fg);font:600 11px var(--font-mono);text-anchor:middle;dominant-baseline:central;pointer-events:none}
+.map .dl.inv{fill:var(--accent-fg)}
+.map .nl{fill:var(--fg);font:600 13px var(--font-body);paint-order:stroke;stroke:var(--surface);stroke-width:4px;stroke-linejoin:round;pointer-events:none}
+.map .acc-tri{fill:var(--bad);pointer-events:none}
+.map .acc-bang{fill:#fff;font:700 14px var(--font-body);text-anchor:middle;pointer-events:none}
+.map .flow{stroke-dasharray:12 8;animation:dash 1s linear infinite}
+@keyframes dash{to{stroke-dashoffset:-20}}
+.legend{font:500 12px/1.5 var(--font-mono);color:var(--muted);margin-top:8px}
+.routebox{padding:12px;border-radius:6px;background:var(--surface-2);font:500 14px/1.5 var(--font-mono);overflow-wrap:anywhere}
+.qlist{list-style:none;margin:0;padding:0;display:grid;gap:4px;font:500 13px/1.4 var(--font-mono)}
+.qlist li{display:flex;justify-content:space-between;gap:12px;padding:6px 10px;border:1px solid var(--line);border-radius:6px;overflow-wrap:anywhere}
+.qlist li:first-child{border-color:var(--accent);background:var(--accent-soft)}
+.qlist em{font-style:normal;font-size:11px;color:var(--accent);letter-spacing:.08em;text-transform:uppercase;margin-right:6px}
+.note{font:500 13px/1.5 var(--font-mono);color:var(--muted);margin-top:8px;overflow-wrap:anywhere}
+.stackl{list-style:none;margin:0;padding:0;display:grid;gap:6px;font:500 13px/1.4 var(--font-mono)}
+.stackl li{padding:8px 10px;border:1px solid var(--line);border-radius:6px;overflow-wrap:anywhere}
+.stackl li:first-child{border-color:var(--accent);background:var(--accent-soft)}
+.stackl .top-tag{display:block;font-size:11px;color:var(--accent);letter-spacing:.08em;text-transform:uppercase;margin-bottom:2px}
+
+/* parking */
+.bays{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.bay{border:2px solid var(--line);border-radius:6px;min-height:120px;padding:10px;display:flex;flex-direction:column;justify-content:space-between;gap:8px;min-width:0}
+.bay.on{border-color:var(--accent);background:var(--accent-soft)}
+.bay .bn{font:600 12px var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.bay .pl{font:600 15px var(--font-mono);overflow-wrap:anywhere}
+.bay .free{font:500 14px var(--font-mono);color:var(--muted)}
+.wq{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.wchip{font:500 13px var(--font-mono);padding:6px 10px;border-radius:5px;background:#5b6877;color:#fff;overflow-wrap:anywhere}
+.wchip:first-child{outline:2px solid var(--accent);outline-offset:1px}
+.subhead{font:600 13px var(--font-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:18px 0 0}
+
+.lots{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:14px}
+.lot{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px;min-width:0;display:flex;flex-direction:column;gap:10px}
+.lot-h{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.lot-h h3{font:600 17px/1.2 var(--font-display);letter-spacing:.05em;text-transform:uppercase;margin:0}
+.pill{font:600 11px var(--font-mono);padding:3px 8px;border-radius:999px;background:var(--surface-2);color:var(--muted);white-space:nowrap}
+.pill.full{background:var(--bad);color:#fff}
+.lot .bays{gap:6px}
+.lot .bay{min-height:84px;padding:6px}
+.lot .bay .bn{font-size:10.5px}
+.lot .bay .pl{font-size:12px}
+.lot .bay .btn.sm{min-height:28px;font-size:12px;padding:0 6px}
+.lot .wq{margin-top:0;min-height:0}
+.lot .wchip{font-size:12px;padding:4px 8px}
+.lot .wline{font:600 12px var(--font-mono);color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+.lot .addrow{display:flex;gap:6px}
+.lot .addrow input{min-width:0;min-height:38px}
+.lot .addrow .btn{min-height:38px;flex:none}
+.lot .err{min-height:0;margin-top:-4px}
+.psum{font:500 14px/1.6 var(--font-mono);margin-bottom:12px}
+
+footer{margin-top:28px;color:var(--muted);font-size:13px;max-width:72ch}
+
+@media (max-width:900px){
+  .two{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:520px){
+  .stack{min-height:360px;padding-inline:5px}
+  .stopline{margin-inline:5px}
+  .veh{font-size:9.5px;padding-inline:2px}
+  .panel{padding:12px}
+  .lh span{font-size:9.5px}
+}
+@media (prefers-reduced-motion:reduce){
+  .map .flow,.k-amb::after,.k-fire::after{animation:none}
+}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Smart City Traffic Control</h1>
+      <p>Four one-way lanes, one signal you control, a route finder with twelve locations, and a parking lot at every location. Every part runs on a queue, a priority queue or a stack.</p>
+    </div>
+    <div class="top-actions">
+      <button class="btn" data-act="reset" type="button">Reset sample data</button>
+      <button class="btn" data-act="clear" type="button">Empty everything</button>
+    </div>
+  </header>
+
+  <div class="tabs" role="tablist" aria-label="Modules">
+    <button class="tab" role="tab" id="t-junction" aria-selected="true" aria-controls="tab-junction" data-act="tab" data-tab="junction" type="button"><b>Junction</b><span>Queues + priority queue</span></button>
+    <button class="tab" role="tab" id="t-gps" aria-selected="false" aria-controls="tab-gps" data-act="tab" data-tab="gps" type="button"><b>Route finder</b><span>Priority queue + stack</span></button>
+    <button class="tab" role="tab" id="t-park" aria-selected="false" aria-controls="tab-park" data-act="tab" data-tab="park" type="button"><b>Parking lots</b><span>Queue at each place</span></button>
+  </div>
+
+  <!-- 1. JUNCTION -->
+  <section id="tab-junction" role="tabpanel" aria-labelledby="t-junction">
+    <div class="two">
+      <div class="panel">
+        <div class="stage-head">
+          <div class="signal">
+            <div class="housing" aria-hidden="true"><i class="lamp r on" id="lampR"></i><i class="lamp a" id="lampA"></i><i class="lamp g" id="lampG"></i></div>
+            <div>
+              <div class="phase red" id="phase">RED</div>
+              <div class="phase-sub" id="phaseSub">Vehicles are stopped</div>
+            </div>
+          </div>
+          <div class="passed"><b id="passed">0</b>vehicles passed</div>
+          <div class="banner" id="banner" role="status" hidden>Emergency: signal preempted</div>
+        </div>
+
+        <div class="lane-heads">
+          <div class="lh" id="lh1"><b>Lane 1</b><span>Cars</span><span id="cnt1">0 waiting</span></div>
+          <div class="lh" id="lh2"><b>Lane 2</b><span>Cars</span><span id="cnt2">0 waiting</span></div>
+          <div class="lh" id="lh3"><b>Lane 3</b><span>Cars</span><span id="cnt3">0 waiting</span></div>
+          <div class="lh pri" id="lh4"><b>Lane 4</b><span>Ambulance, fire truck, bus</span><span id="cnt4">0 waiting</span></div>
+        </div>
+        <div class="road" id="road">
+          <div class="lane" id="lane1"><div class="exit"></div><div class="stopline"></div><div class="stack" id="stack1"></div></div>
+          <div class="lane" id="lane2"><div class="exit"></div><div class="stopline"></div><div class="stack" id="stack2"></div></div>
+          <div class="lane" id="lane3"><div class="exit"></div><div class="stopline"></div><div class="stack" id="stack3"></div></div>
+          <div class="lane lane-pri" id="lane4"><div class="exit"></div><div class="stopline"></div><div class="stack" id="stack4"></div></div>
+        </div>
+        <div class="readouts" id="readouts"></div>
+      </div>
+
+      <div class="side">
+        <div class="panel">
+          <p class="dsnote">All four lanes are one-way and lead to one signal. A new car joins whichever of Lanes 1 to 3 has the fewest vehicles. Lane 4 is only for ambulances, fire trucks and buses and works as a priority queue: Ambulance first, then Fire truck, then Bus. When the signal is green, every lane moves forward.</p>
+
+          <div class="sect">
+            <h2>Signal</h2>
+            <button class="btn big go" id="b-sig" data-act="sig" type="button">Turn signal green</button>
+            <label class="toggle" style="margin-top:8px"><input type="checkbox" id="pre"> Emergency preemption: an ambulance or fire truck at a red light turns it green</label>
+          </div>
+
+          <div class="sect">
+            <h2>Add a vehicle</h2>
+            <label class="lbl" for="s-name">Plate or number (optional, a random one is used if blank)</label>
+            <input type="text" id="s-name" placeholder="e.g. MH01-4521 or 502" autocomplete="off" maxlength="24">
+            <div class="btns" style="margin-top:10px">
+              <button class="btn primary" data-act="add-car" type="button">Normal car</button>
+              <button class="btn" data-act="add-amb" type="button"><span class="dot" style="background:#d03a30"></span>Ambulance</button>
+              <button class="btn" data-act="add-fire" type="button"><span class="dot" style="background:var(--veh-fire)"></span>Fire truck</button>
+              <button class="btn" data-act="add-bus" type="button"><span class="dot" style="background:var(--veh-bus)"></span>Bus</button>
+            </div>
+          </div>
+
+          <div class="sect">
+            <h2>Simulation</h2>
+            <div class="btns"><button class="btn" data-act="add-five" type="button">Add 5 random vehicles</button></div>
+            <label class="toggle"><input type="checkbox" id="rand"> Random vehicles keep arriving</label>
+          </div>
+        </div>
+        <div class="panel"><h2>Activity</h2><ol class="log" id="log-junction"></ol></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. ROUTE FINDER -->
+  <section id="tab-gps" role="tabpanel" aria-labelledby="t-gps" hidden>
+    <div class="two">
+      <div class="mainc">
+        <div class="panel">
+          <h2>City map</h2>
+          <p class="dsnote">Numbers on the roads are lengths in km. Click a road to report or clear an accident. Run the search to watch it work, one location at a time.</p>
+          <svg class="map" id="map" viewBox="0 0 780 440" role="img" aria-label="Map of twelve locations joined by roads with distances in kilometres"></svg>
+          <p class="legend">Green ring: start. Dark ring: destination. Red dashes: accident. Number in a circle: distance from the start so far.</p>
+        </div>
+        <div class="panel">
+          <h2>How the search is working</h2>
+          <div id="g-state"><p class="note" style="margin-top:0">Press "Find route" to see the queue or stack at every step.</p></div>
+          <div class="routebox" id="routebox" style="margin-top:12px">No route yet.</div>
+        </div>
+      </div>
+      <div class="side">
+        <div class="panel">
+          <div class="sect">
+            <h2>Trip</h2>
+            <div class="row2">
+              <div><label class="lbl" for="g-from">From</label><select id="g-from"></select></div>
+              <div><label class="lbl" for="g-to">To</label><select id="g-to"></select></div>
+            </div>
+            <div class="radios" role="radiogroup" aria-label="Search method">
+              <label class="toggle"><input type="radio" name="algo" value="dij" checked> Shortest path (Dijkstra, uses a priority queue)</label>
+              <label class="toggle"><input type="radio" name="algo" value="dfs"> Stack search (first route found, as in the C++ code)</label>
+            </div>
+            <label class="toggle"><input type="checkbox" id="g-anim" checked> Animate the search</label>
+            <div class="btns" style="margin-top:10px">
+              <button class="btn primary" data-act="g-find" type="button">Find route</button>
+              <button class="btn" data-act="g-skip" id="g-skip" type="button" disabled>Skip animation</button>
+            </div>
+          </div>
+          <div class="sect">
+            <h2>Accidents</h2>
+            <label class="lbl" for="g-road">Road</label>
+            <select id="g-road"></select>
+            <div class="btns" style="margin-top:10px"><button class="btn" data-act="g-block" id="g-block" type="button">Report accident</button></div>
+            <label class="toggle"><input type="checkbox" id="g-auto" checked> Re-route automatically when my road is blocked</label>
+          </div>
+          <div class="sect">
+            <h2>Route history (stack)</h2>
+            <ol class="stackl" id="g-hist"></ol>
+            <div class="btns" style="margin-top:10px"><button class="btn" data-act="g-undo" type="button">Back button: undo last route</button></div>
+          </div>
+        </div>
+        <div class="panel"><h2>Activity</h2><ol class="log" id="log-gps"></ol></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. PARKING LOTS -->
+  <section id="tab-park" role="tabpanel" aria-labelledby="t-park" hidden>
+    <div class="panel" style="margin-bottom:20px">
+      <h2>Parking at every location</h2>
+      <p class="dsnote">Each location has its own lot with 3 bays and its own waiting queue. When a lot is full, new arrivals join its queue. When a vehicle leaves, the first vehicle in that queue takes the free bay.</p>
+      <div class="psum" id="p-sum"></div>
+      <div class="btns" style="max-width:440px"><button class="btn" data-act="p-random-all" type="button">Add a random vehicle to every location</button></div>
+    </div>
+    <div class="lots" id="lots"></div>
+    <div class="panel" style="margin-top:20px"><h2>Activity</h2><ol class="log" id="log-park"></ol></div>
+  </section>
+
+  <footer>Logic follows traffic_menu.cpp: <code>queue</code> for the lanes and the parking waitlist, <code>priority_queue</code> ordered by priority then arrival for Lane 4, and a <code>stack</code> for route search and route history. Vehicles shown at the start are sample data.</footer>
+</div>
+
+<script>
+(function(){
+'use strict';
+var $ = function(s){ return document.querySelector(s); };
+var esc = function(s){ return String(s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
+
+var REDUCED = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+var CANANIM = typeof Element.prototype.animate === 'function';
+
+/* ---------- constants ---------- */
+var KINDS = ['', 'Ambulance', 'Fire truck', 'Bus'];
+var CLS   = ['', 'amb', 'fire', 'bus'];
+var CAR_COLORS = ['#5b6877','#3f7cc0','#6d8f4e','#a05a8a','#c2823a','#3f9a94','#7c6bb5'];
+var TICK = 100, REL = 700, AMBER = 1000, MAXSHOW = 7, CAPACITY = 3;
+
+/* ---------- state ---------- */
+var uid = 0, order = 0, passed = 0;
+var lanes = [[], [], []];        // three regular lanes, each a queue of {id,name,color}
+var pq = [];                     // Lane 4: priority queue kept in service order {id,name,priority,order}
+var sig = { phase:'red', t:0, preempted:false };
+var acc = [0, 0, 0, 0];
+var logs = { junction:[], gps:[], park:[] };
+var lots = [];             // one parking lot per location: {parked:[], waiting:[]}
+
+function mkCar(n){ var id = ++uid; return { id:id, name:n, color:CAR_COLORS[id % CAR_COLORS.length] }; }
+function pqPush(priority, name){
+  var v = { id:++uid, name:name, priority:priority, order:order++ };
+  var i = -1;
+  for (var k = 0; k < pq.length; k++){ if (pq[k].priority > priority){ i = k; break; } }
+  if (i < 0) i = pq.length;
+  pq.splice(i, 0, v);
+  return v;
+}
+function plate(){ return 'MH' + String(1 + Math.floor(Math.random()*47)).padStart(2,'0') + '-' + (1000 + Math.floor(Math.random()*9000)); }
+function busNo(){ return String(100 + Math.floor(Math.random()*800)); }
+
+/* ---------- logging ---------- */
+function log(tab, msg, cls){
+  logs[tab].unshift({ msg:msg, cls:cls || '' });
+  if (logs[tab].length > 60) logs[tab].pop();
+  renderLog(tab);
+}
+function renderLog(tab){
+  var el = $('#log-' + tab);
+  el.innerHTML = logs[tab].length
+    ? logs[tab].map(function(l){ return '<li class="' + l.cls + '">' + esc(l.msg) + '</li>'; }).join('')
+    : '<li class="dim">No activity yet.</li>';
+}
+
+/* ---------- drawing the lanes ---------- */
+function chip(cls, label, badge, id, color){
+  return '<div class="veh k-' + cls + '" data-id="' + id + '"' + (color ? ' style="background:' + color + '"' : '') + '>'
+    + (badge ? '<span class="pb">' + badge + '</span>' : '') + '<span class="nm">' + esc(label) + '</span></div>';
+}
+function stackHtml(items, empty){
+  return items.slice(0, MAXSHOW).join('')
+    + (items.length > MAXSHOW ? '<div class="more">+' + (items.length - MAXSHOW) + ' more</div>' : '')
+    || '<div class="empty">' + empty + '</div>';
+}
+/* The front vehicle drives over the stop line, through the junction and off the top of the road. */
+function ghost(stackId){
+  if (REDUCED || !CANANIM) return;
+  var first = $('#' + stackId + ' .veh');
+  if (!first) return;
+  var laneEl = first.closest('.lane'), road = $('#road');
+  var g = first.cloneNode(true);
+  var a = first.getBoundingClientRect(), b = laneEl.getBoundingClientRect(), r = road.getBoundingClientRect();
+  g.classList.add('ghost');
+  g.removeAttribute('data-id');
+  g.style.top = (a.top - b.top) + 'px';
+  g.style.left = (a.left - b.left) + 'px';
+  g.style.width = a.width + 'px';
+  laneEl.appendChild(g);
+  var dist = (a.top - r.top) + a.height + 30;
+  var an = g.animate([{ transform:'translateY(0)' }, { transform:'translateY(-' + dist + 'px)' }], { duration:1100, easing:'cubic-bezier(.4,0,.8,.5)', fill:'forwards' });
+  an.onfinish = function(){ if (g.parentNode) g.parentNode.removeChild(g); };
+}
+/* FLIP: remember where each vehicle was, then slide the ones that stay into their new slot.
+   A vehicle with no earlier position is new: it drives in from the bottom of the road into its lane. */
+function snapshot(){
+  var m = {};
+  document.querySelectorAll('#road .veh:not(.ghost)').forEach(function(el){
+    var r = el.getBoundingClientRect();
+    m[el.getAttribute('data-id')] = { l:r.left, t:r.top };
+  });
+  return m;
+}
+function animateIn(before){
+  if (REDUCED || !CANANIM) return;
+  var road = $('#road').getBoundingClientRect();
+  document.querySelectorAll('#road .veh:not(.ghost)').forEach(function(el){
+    var id = el.getAttribute('data-id'), r = el.getBoundingClientRect(), b = before[id];
+    if (b){
+      var dx = b.l - r.left, dy = b.t - r.top;
+      if (Math.abs(dx) > 1 || Math.abs(dy) > 1) el.animate([{ transform:'translate(' + dx + 'px,' + dy + 'px)' }, { transform:'none' }], { duration:500, easing:'ease-out' });
+    } else {
+      var sx = (road.left + road.width / 2) - (r.left + r.width / 2), sy = road.bottom - r.top + 14;
+      el.animate([{ transform:'translate(' + sx + 'px,' + sy + 'px)' }, { transform:'none' }], { duration:1200, easing:'cubic-bezier(.25,.6,.3,1)' });
+    }
+  });
+}
+function flashLane(i){
+  if (REDUCED || !CANANIM) return;
+  var h = $('#lh' + (i + 1));
+  if (h) h.animate([{ background:'var(--accent-soft)' }, { background:'transparent' }], { duration:1400 });
+}
+function renderLanes(){
+  var before = snapshot();
+  for (var i = 0; i < 3; i++){
+    $('#stack' + (i + 1)).innerHTML = stackHtml(lanes[i].map(function(v){ return chip('car', v.name, '', v.id, v.color); }), 'Empty');
+    $('#cnt' + (i + 1)).textContent = lanes[i].length + ' waiting';
+  }
+  $('#stack4').innerHTML = stackHtml(pq.map(function(v){ return chip(CLS[v.priority], v.name, 'P' + v.priority, v.id); }), 'Empty');
+  $('#cnt4').textContent = pq.length + ' waiting';
+  var ro = '';
+  for (var j = 0; j < 3; j++){
+    ro += '<div class="readout"><b>Lane ' + (j + 1) + '</b> front &rarr; ' + (lanes[j].length ? lanes[j].map(function(v){ return '[' + esc(v.name) + ']'; }).join(' ') : 'empty') + '</div>';
+  }
+  ro += '<div class="readout"><b>Lane 4</b> next out &rarr; ' + (pq.length ? pq.map(function(v){ return '[' + esc(v.name) + ']'; }).join(' ') : 'empty') + '</div>';
+  $('#readouts').innerHTML = ro;
+  $('#passed').textContent = passed;
+  animateIn(before);
+}
+
+/* ---------- signal ---------- */
+function renderSignal(){
+  var p = sig.phase;
+  $('#lampR').classList.toggle('on', p === 'red');
+  $('#lampA').classList.toggle('on', p === 'amber');
+  $('#lampG').classList.toggle('on', p === 'green');
+  var ph = $('#phase');
+  ph.textContent = p.toUpperCase();
+  ph.className = 'phase ' + p;
+  $('#phaseSub').textContent = p === 'green' ? 'All lanes are moving' : p === 'amber' ? 'Vehicles slow down' : 'Vehicles are stopped';
+  var road = $('#road');
+  road.classList.toggle('go', p === 'green');
+  road.classList.toggle('amb', p === 'amber');
+  var b = $('#b-sig');
+  b.disabled = (p === 'amber');
+  b.textContent = p === 'red' ? 'Turn signal green' : p === 'green' ? 'Turn signal red' : 'Changing to red';
+  b.className = 'btn big ' + (p === 'red' ? 'go' : 'stop');
+  $('#banner').hidden = !sig.preempted;
+}
+function setGreen(){
+  sig.phase = 'green'; acc = [600, 450, 300, 150];
+  log('junction', 'Signal turned green. All lanes move forward.', 'ok');
+  renderSignal();
+}
+function startAmber(){
+  sig.phase = 'amber'; sig.t = AMBER;
+  renderSignal();
+}
+function toggleSignal(){
+  if (sig.phase === 'red') setGreen();
+  else if (sig.phase === 'green'){ sig.preempted = false; startAmber(); log('junction', 'Signal turned red. Vehicles stop at the line.', 'ok'); }
+}
+function emergencyWaiting(){ return pq.length > 0 && pq[0].priority <= 2; }
+function maybePreempt(){
+  if (!$('#pre').checked || sig.phase !== 'red' || !emergencyWaiting()) return;
+  setGreen();
+  sig.preempted = true;
+  log('junction', 'EMERGENCY: signal preempted for ' + pq[0].name + '.', 'alert');
+  renderSignal();
+}
+
+/* ---------- vehicles arrive and leave ---------- */
+function bestLane(){
+  var best = 0;
+  for (var i = 1; i < 3; i++) if (lanes[i].length < lanes[best].length) best = i;
+  return best;
+}
+function addCar(name){
+  var n = name || plate();
+  var counts = lanes.map(function(l, i){ return 'L' + (i + 1) + ' ' + l.length; }).join(', ');
+  var li = bestLane();
+  lanes[li].push(mkCar(n));
+  log('junction', n + ' picks Lane ' + (li + 1) + ', the least occupied (' + counts + ').', 'ok');
+  flashLane(li);
+  renderLanes();
+}
+function addPriority(k, name){
+  var label = k === 3 ? 'Bus ' + (name || busNo()) : KINDS[k];
+  pqPush(k, label);
+  var pos = pq.length;
+  for (var i = 0; i < pq.length; i++){ if (pq[i].name === label){ pos = i + 1; } }
+  log('junction', label + ' enters Lane 4' + (k <= 2 ? ' (priority ' + k + ')' : ' (priority 3)') + '. ' + pq.length + ' waiting.', k <= 2 ? 'alert' : 'ok');
+  flashLane(3);
+  renderLanes();
+  maybePreempt();
+}
+function randomVehicle(){
+  var r = Math.random();
+  if (r < 0.68) addCar('');
+  else if (r < 0.80) addPriority(3, '');
+  else if (r < 0.90) addPriority(1, '');
+  else addPriority(2, '');
+}
+function releaseLanes(){
+  var any = false;
+  for (var i = 0; i < 3; i++){
+    acc[i] += TICK;
+    if (acc[i] >= REL && lanes[i].length){
+      acc[i] = 0; any = true;
+      ghost('stack' + (i + 1));
+      var c = lanes[i].shift(); passed++;
+      log('junction', c.name + ' crosses (Lane ' + (i + 1) + ').', 'ok');
+    }
+  }
+  acc[3] += TICK;
+  if (acc[3] >= REL && pq.length){
+    acc[3] = 0; any = true;
+    ghost('stack4');
+    var v = pq.shift(); passed++;
+    log('junction', v.name + ' crosses (Lane 4)' + (v.priority <= 2 ? '  [EMERGENCY]' : '') + '.', v.priority <= 2 ? 'alert' : 'ok');
+  }
+  if (any) renderLanes();
+}
+
+/* ---------- timer ---------- */
+var arrAcc = 0, arrNext = 2200;
+setInterval(function(){
+  if (sig.phase === 'green'){
+    releaseLanes();
+    if (sig.preempted && !emergencyWaiting()){
+      sig.preempted = false;
+      startAmber();
+      log('junction', 'Emergency vehicles have passed. Signal returns to red.', 'ok');
+    }
+  } else if (sig.phase === 'amber'){
+    sig.t -= TICK;
+    if (sig.t <= 0){ sig.phase = 'red'; renderSignal(); maybePreempt(); }
+  }
+  if ($('#rand').checked){
+    arrAcc += TICK;
+    if (arrAcc >= arrNext){ arrAcc = 0; arrNext = 1500 + Math.random() * 1800; randomVehicle(); }
+  }
+}, TICK);
+
+/* =====================================================================
+   ROUTE FINDER
+   ===================================================================== */
+var PL = [
+  { n:'Home',         x:60,  y:230, ly:34 },
+  { n:'School',       x:160, y:100, ly:-26 },
+  { n:'Market',       x:170, y:360, ly:34 },
+  { n:'Park',         x:320, y:230, lx:24, ly:22, a:'start' },
+  { n:'Hospital',     x:330, y:70,  ly:-26 },
+  { n:'Bridge',       x:340, y:375, ly:34 },
+  { n:'Station',     x:490, y:170, lx:-24, ly:-10, a:'end' },
+  { n:'Mall',         x:500, y:320, ly:34 },
+  { n:'Fire Station', x:500, y:50,  ly:-26 },
+  { n:'Stadium',      x:640, y:90,  ly:-26 },
+  { n:'Office',       x:680, y:230, lx:26, ly:5, a:'start' },
+  { n:'Airport',      x:660, y:385, ly:34 }
+];
+var EDGES = [
+  [0,1,4],[0,3,5],[0,2,3],[1,4,4],[1,3,3],[2,3,4],[2,5,3],[3,4,5],[3,6,4],[3,5,4],[4,8,3],
+  [8,6,2],[8,9,5],[6,9,4],[6,10,5],[6,7,3],[5,7,3],[7,10,4],[7,11,3],[9,10,3],[10,11,4]
+];
+var ADJ = PL.map(function(){ return []; });
+EDGES.forEach(function(e){ ADJ[e[0]].push([e[1], e[2]]); ADJ[e[1]].push([e[0], e[2]]); });
+function ek(a, b){ return a < b ? a + '-' + b : b + '-' + a; }
+function edgeName(e){ return PL[e[0]].n + ' – ' + PL[e[1]].n; }
+function pathDist(p){
+  var t = 0;
+  for (var i = 0; i + 1 < p.length; i++){
+    for (var k = 0; k < ADJ[p[i]].length; k++) if (ADJ[p[i]][k][0] === p[i+1]) t += ADJ[p[i]][k][1];
+  }
+  return t;
+}
+function routeText(p){ return p.map(function(i){ return PL[i].n; }).join(' → '); }
+
+var blockedE = {};      // edge key -> true
+var hist = [];          // stack of {text, path}
+var curRoute = [];
+var view = null;        // what the map shows while searching: {cur, done, dist, front, seen}
+var run = null;         // running animation
+
+/* Dijkstra: a priority queue of (distance, place). Records one step per place settled. */
+function dijkstra(s, d){
+  var dist = PL.map(function(){ return Infinity; }), prev = PL.map(function(){ return -1; });
+  var done = {}, q = [{ n:s, d:0 }], steps = [];
+  dist[s] = 0;
+  while (q.length){
+    q.sort(function(a, b){ return a.d - b.d || a.n - b.n; });
+    var u = q.shift();
+    if (done[u.n]) continue;
+    done[u.n] = true;
+    var notes = [];
+    if (u.n !== d){
+      ADJ[u.n].forEach(function(e){
+        var v = e[0], w = e[1];
+        if (blockedE[ek(u.n, v)]){ notes.push('skipped blocked road to ' + PL[v].n); return; }
+        if (done[v]) return;
+        var nd = u.d + w;
+        if (nd < dist[v]){ dist[v] = nd; prev[v] = u.n; q.push({ n:v, d:nd }); notes.push(PL[v].n + ' now ' + nd + ' km'); }
+      });
+    }
+    var fm = {};
+    q.forEach(function(x){ if (!done[x.n] && (fm[x.n] === undefined || x.d < fm[x.n])) fm[x.n] = x.d; });
+    var front = Object.keys(fm).map(function(k){ return { n:+k, d:fm[k] }; }).sort(function(a, b){ return a.d - b.d || a.n - b.n; });
+    var seen = {};
+    for (var v2 = 0; v2 < PL.length; v2++) if (prev[v2] >= 0 && dist[v2] < Infinity) seen[ek(prev[v2], v2)] = true;
+    steps.push({
+      cur:u.n, d:u.d, done:JSON.parse(JSON.stringify(done)), dist:dist.slice(), front:front, seen:seen,
+      note: (u.n === d ? 'Reached ' + PL[u.n].n + ' at ' + u.d + ' km. The search stops: nothing nearer is left to try.'
+        : (steps.length === 0 ? 'Start at ' : 'Settle ') + PL[u.n].n + ' (' + u.d + ' km). ' + (notes.length ? 'Updated: ' + notes.join(', ') + '.' : 'No shorter route found from here.'))
+    });
+    if (u.n === d) break;
+  }
+  var path = [];
+  if (dist[d] < Infinity){ for (var c = d; c !== -1; c = prev[c]) path.unshift(c); }
+  return { path:path, steps:steps, kind:'dij' };
+}
+/* Stack search, as in the C++ code: a stack of partial routes, pop the newest, push its extensions. */
+function dfs(s, d){
+  var st = [[s]], pops = 0, steps = [];
+  while (st.length && pops < 50000){
+    var path = st.pop(); pops++;
+    var cur = path[path.length - 1];
+    var found = (cur === d);
+    if (!found){
+      ADJ[cur].forEach(function(e){
+        var v = e[0];
+        if (blockedE[ek(cur, v)]) return;
+        if (path.indexOf(v) >= 0) return;
+        st.push(path.concat([v]));
+      });
+    }
+    if (steps.length < 300){
+      var seen = {};
+      for (var i = 0; i + 1 < path.length; i++) seen[ek(path[i], path[i+1])] = true;
+      var onp = {}; path.forEach(function(x){ onp[x] = true; });
+      steps.push({ cur:cur, path:path, pops:pops, found:found, size:st.length, stackTop:st.slice(-6).reverse(), done:onp, seen:seen });
+    }
+    if (found) return { path:path, pops:pops, steps:steps, kind:'dfs' };
+  }
+  return { path:[], pops:pops, steps:steps, kind:'dfs' };
+}
+
+function statePanel(step, kind){
+  if (kind === 'dij'){
+    var items = step.front.map(function(f){ return '<li><span>' + esc(PL[f.n].n) + '</span><b>' + f.d + ' km</b></li>'; }).join('') || '<li><span class="muted">Queue is empty</span></li>';
+    return '<h3>Priority queue, nearest first</h3><ol class="qlist">' + items + '</ol><p class="note">' + esc(step.note) + '</p>';
+  }
+  var it = step.stackTop.map(function(p, i){ return '<li><span>' + (i === 0 ? '<em>top</em>' : '') + esc(routeText(p)) + '</span><b>' + pathDist(p) + ' km</b></li>'; }).join('') || '<li><span class="muted">Stack is empty</span></li>';
+  return '<h3>Stack of partial routes, newest on top</h3><ol class="qlist">' + it + '</ol>'
+    + (step.size > step.stackTop.length ? '<p class="note">+' + (step.size - step.stackTop.length) + ' more routes below</p>' : '')
+    + '<p class="note">Pop #' + step.pops + ': ' + esc(routeText(step.path)) + (step.found ? '. This ends at the destination.' : '.') + '</p>';
+}
+function viewFrom(step, kind){
+  if (kind === 'dij') return { cur:step.cur, done:step.done, dist:step.dist, front:(function(){ var m = {}; step.front.forEach(function(f){ m[f.n] = f.d; }); return m; })(), seen:step.seen };
+  return { cur:step.cur, done:step.done, dist:null, front:{}, seen:step.seen };
+}
+
+function renderGps(){
+  var from = +$('#g-from').value, to = +$('#g-to').value;
+  var routing = !!run;
+  var onNode = {}, onEdge = {};
+  if (!routing && curRoute.length){
+    curRoute.forEach(function(n){ onNode[n] = true; });
+    for (var i = 0; i + 1 < curRoute.length; i++) onEdge[ek(curRoute[i], curRoute[i+1])] = true;
+  }
+  var s = '';
+  EDGES.forEach(function(e){
+    var a = e[0], b = e[1], key = ek(a, b);
+    var x1 = PL[a].x, y1 = PL[a].y, x2 = PL[b].x, y2 = PL[b].y;
+    var dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy), ux = dx / len, uy = dy / len, R = 18;
+    var sx = (x1 + ux * R).toFixed(1), sy = (y1 + uy * R).toFixed(1), ex = (x2 - ux * R).toFixed(1), ey = (y2 - uy * R).toFixed(1);
+    var cls = 'edge';
+    if (view && view.seen && view.seen[key]) cls += ' seen';
+    if (onEdge[key]) cls += ' on flow';
+    if (blockedE[key]) cls = 'edge blocked';
+    s += '<line class="' + cls + '" x1="' + sx + '" y1="' + sy + '" x2="' + ex + '" y2="' + ey + '"/>';
+    s += '<line class="hit" data-edge="' + key + '" x1="' + sx + '" y1="' + sy + '" x2="' + ex + '" y2="' + ey + '"><title>' + esc(edgeName(e)) + ', ' + e[2] + ' km. Click to report or clear an accident.</title></line>';
+  });
+  EDGES.forEach(function(e){
+    var mx = (PL[e[0]].x + PL[e[1]].x) / 2, my = (PL[e[0]].y + PL[e[1]].y) / 2;
+    s += '<text class="wl" x="' + mx + '" y="' + my + '">' + e[2] + '</text>';
+  });
+  EDGES.forEach(function(e){
+    if (!blockedE[ek(e[0], e[1])]) return;
+    var mx = (PL[e[0]].x + PL[e[1]].x) / 2, my = (PL[e[0]].y + PL[e[1]].y) / 2;
+    s += '<polygon class="acc-tri" points="' + mx + ',' + (my - 17) + ' ' + (mx + 16) + ',' + (my + 11) + ' ' + (mx - 16) + ',' + (my + 11) + '"/><text class="acc-bang" x="' + mx + '" y="' + (my + 8) + '">!</text>';
+  });
+  PL.forEach(function(p, i){
+    var cls = 'node';
+    if (view && view.done && view.done[i]) cls += ' visited';
+    if (view && view.front && view.front[i] !== undefined) cls += ' front';
+    if (onNode[i]) cls += ' path';
+    if (view && view.cur === i) cls += ' cur';
+    if (i === from) cls += ' start';
+    if (i === to) cls += ' dest';
+    var label = (view && view.dist && view.dist[i] < Infinity) ? view.dist[i] : '';
+    s += '<circle class="' + cls + '" cx="' + p.x + '" cy="' + p.y + '" r="18"/>';
+    if (label !== '') s += '<text class="dl' + (onNode[i] ? ' inv' : '') + '" x="' + p.x + '" y="' + p.y + '">' + label + '</text>';
+    s += '<text class="nl" text-anchor="' + (p.a || 'middle') + '" x="' + (p.x + (p.lx || 0)) + '" y="' + (p.y + (p.ly || 34)) + '">' + esc(p.n) + '</text>';
+  });
+  $('#map').innerHTML = s;
+
+  var rk = $('#g-road').value, isB = !!blockedE[rk];
+  $('#g-block').textContent = isB ? 'Clear accident' : 'Report accident';
+  $('#g-hist').innerHTML = hist.length
+    ? hist.slice().reverse().map(function(h, i){ return '<li>' + (i === 0 ? '<span class="top-tag">Top of stack</span>' : '') + esc(h.text) + '</li>'; }).join('')
+    : '<li class="muted">No routes yet.</li>';
+  $('#g-skip').disabled = !run;
+}
+
+function cancelRun(){ if (run && run.timer) clearInterval(run.timer); run = null; }
+function commit(res, s, d){
+  var routebox = $('#routebox');
+  if (!res.path.length){
+    curRoute = [];
+    routebox.textContent = 'No route available from ' + PL[s].n + ' to ' + PL[d].n + '.';
+    log('gps', 'No route available from ' + PL[s].n + ' to ' + PL[d].n + '.', 'alert');
+    return;
+  }
+  curRoute = res.path;
+  var dist = pathDist(res.path), txt = routeText(res.path) + ' (' + dist + ' km)';
+  hist.push({ text:txt, path:res.path });
+  var extra;
+  if (res.kind === 'dij'){
+    extra = 'Dijkstra settled ' + res.steps.length + ' locations with a priority queue. No shorter route exists.';
+  } else {
+    var sp = dijkstra(s, d), sd = sp.path.length ? pathDist(sp.path) : null;
+    extra = 'Found after ' + res.pops + ' stack pops.';
+    if (sd !== null) extra += dist > sd ? ' The shortest route is ' + sd + ' km: ' + routeText(sp.path) + '.' : ' This is also the shortest route.';
+  }
+  routebox.innerHTML = '<b>Route:</b> ' + esc(routeText(res.path)) + '<br><b>Distance:</b> ' + dist + ' km<br><span class="muted">' + esc(extra) + '</span>';
+  log('gps', (res.kind === 'dij' ? 'Shortest route: ' : 'Stack route: ') + txt, 'ok');
+}
+function finishRun(){
+  if (!run) return;
+  var r = run; cancelRun();
+  var last = r.res.steps[r.res.steps.length - 1];
+  view = (r.res.kind === 'dij' && last) ? viewFrom(last, 'dij') : null;
+  if (view) view.cur = -1;
+  if (last && r.res.kind === 'dij') $('#g-state').innerHTML = statePanel(last, 'dij');
+  else if (last) $('#g-state').innerHTML = statePanel(last, 'dfs');
+  commit(r.res, r.s, r.d);
+  renderGps();
+}
+function stepRun(){
+  if (!run) return;
+  run.idx++;
+  if (run.idx >= run.res.steps.length){ finishRun(); return; }
+  var st = run.res.steps[run.idx];
+  view = viewFrom(st, run.res.kind);
+  $('#g-state').innerHTML = statePanel(st, run.res.kind);
+  renderGps();
+}
+function startRoute(){
+  cancelRun();
+  var s = +$('#g-from').value, d = +$('#g-to').value;
+  if (s === d){ log('gps', 'Choose two different places.', 'alert'); return; }
+  var algo = document.querySelector('input[name="algo"]:checked').value;
+  var res = algo === 'dij' ? dijkstra(s, d) : dfs(s, d);
+  run = { res:res, s:s, d:d, idx:-1, timer:null };
+  view = null; curRoute = [];
+  if ($('#g-anim').checked && res.steps.length && !REDUCED){
+    run.timer = setInterval(stepRun, algo === 'dij' ? 750 : 450);
+    stepRun();
+  } else finishRun();
+}
+function toggleBlock(key){
+  if (!key) return;
+  var parts = key.split('-'), e = [+parts[0], +parts[1]];
+  var wasOn = false;
+  for (var i = 0; i + 1 < curRoute.length; i++) if (ek(curRoute[i], curRoute[i+1]) === key) wasOn = true;
+  cancelRun(); view = null;
+  $('#g-state').innerHTML = '<p class="note" style="margin-top:0">Press "Find route" to see the queue or stack at every step.</p>';
+  if (blockedE[key]){ delete blockedE[key]; log('gps', 'Road cleared: ' + edgeName(e) + '.', 'ok'); renderGps(); return; }
+  blockedE[key] = true;
+  log('gps', 'Accident reported on ' + edgeName(e) + '.', 'alert');
+  if (wasOn && $('#g-auto').checked){
+    var s = curRoute[0], d = curRoute[curRoute.length - 1];
+    $('#g-from').value = s; $('#g-to').value = d;
+    log('gps', 'Your route used that road. Finding a detour.', 'dim');
+    startRoute();
+  } else {
+    if (wasOn) $('#routebox').textContent = 'Your current route uses a blocked road. Press Find route to re-route.';
+    renderGps();
+  }
+}
+function undoRoute(){
+  if (!hist.length){ log('gps', 'Nothing to undo.', 'dim'); return; }
+  var h = hist.pop();
+  log('gps', 'Removed: ' + h.text, 'ok');
+  cancelRun(); view = null;
+  curRoute = hist.length ? hist[hist.length - 1].path : [];
+  $('#routebox').innerHTML = hist.length ? '<b>Route:</b> ' + esc(hist[hist.length - 1].text) : 'No route yet.';
+  renderGps();
+}
+function initGpsControls(){
+  var opts = PL.map(function(p, i){ return '<option value="' + i + '">' + esc(p.n) + '</option>'; }).join('');
+  $('#g-from').innerHTML = opts; $('#g-to').innerHTML = opts;
+  $('#g-from').value = 0; $('#g-to').value = 10;
+  $('#g-road').innerHTML = EDGES.map(function(e){ return '<option value="' + ek(e[0], e[1]) + '">' + esc(edgeName(e)) + ' (' + e[2] + ' km)</option>'; }).join('');
+  $('#g-road').value = ek(6, 10);
+}
+
+/* =====================================================================
+   PARKING (a lot and a waiting queue at every location)
+   ===================================================================== */
+function newLots(){ return PL.map(function(){ return { parked:[], waiting:[] }; }); }
+function seedLots(){
+  var seed = {
+    0:[['MH01-1111'],[]], 1:[['MH02-2201','MH02-2202'],[]], 3:[['MH03-3301'],[]],
+    4:[['MH04-4401','MH04-4402'],[]], 6:[['MH05-5501','MH05-5502','MH05-5503'],['MH05-5504']],
+    7:[['MH06-6601','MH06-6602','MH06-6603'],['MH06-6604','MH06-6605']], 8:[['MH07-7701'],[]],
+    9:[['MH08-8801','MH08-8802'],[]], 10:[['MH09-9901'],[]], 11:[['MH10-1001','MH10-1002','MH10-1003'],['MH10-1004']]
+  };
+  Object.keys(seed).forEach(function(k){ lots[+k].parked = seed[k][0].slice(); lots[+k].waiting = seed[k][1].slice(); });
+}
+function buildLots(){
+  $('#lots').innerHTML = PL.map(function(p, i){
+    return '<div class="lot">'
+      + '<div class="lot-h"><h3>' + esc(p.n) + '</h3><span class="pill" id="pill' + i + '">0/' + CAPACITY + '</span></div>'
+      + '<div class="bays" id="bays' + i + '"></div>'
+      + '<div class="wline" id="wl' + i + '">Waiting: 0</div><div class="wq" id="wq' + i + '"></div>'
+      + '<div class="addrow"><input type="text" id="pn' + i + '" data-lot="' + i + '" placeholder="Vehicle number" aria-label="Vehicle number for ' + esc(p.n) + '" autocomplete="off" maxlength="24">'
+      + '<button class="btn primary sm" data-act="p-arrive" data-lot="' + i + '" type="button">Arrives</button></div>'
+      + '<span class="err" id="pe' + i + '" aria-live="polite"></span></div>';
+  }).join('');
+}
+function renderPark(){
+  var tp = 0, tw = 0, full = 0;
+  lots.forEach(function(L, i){
+    tp += L.parked.length; tw += L.waiting.length;
+    var isFull = L.parked.length >= CAPACITY;
+    if (isFull) full++;
+    var pill = $('#pill' + i);
+    pill.textContent = (isFull ? 'Full ' : '') + L.parked.length + '/' + CAPACITY;
+    pill.className = 'pill' + (isFull ? ' full' : '');
+    var b = '';
+    for (var k = 0; k < CAPACITY; k++){
+      b += L.parked[k]
+        ? '<div class="bay on"><span class="bn">Bay ' + (k + 1) + '</span><span class="pl">' + esc(L.parked[k]) + '</span><button class="btn sm" data-act="p-leave" data-lot="' + i + '" data-i="' + k + '" type="button">Leaves</button></div>'
+        : '<div class="bay"><span class="bn">Bay ' + (k + 1) + '</span><span class="free">Free</span></div>';
+    }
+    $('#bays' + i).innerHTML = b;
+    $('#wl' + i).textContent = 'Waiting: ' + L.waiting.length + (L.waiting.length ? '  (next: ' + L.waiting[0] + ')' : '');
+    $('#wq' + i).innerHTML = L.waiting.map(function(w){ return '<span class="wchip">' + esc(w) + '</span>'; }).join('');
+  });
+  $('#p-sum').textContent = 'Parked: ' + tp + ' of ' + (CAPACITY * lots.length) + ' bays.  Waiting in queues: ' + tw + '.  Full lots: ' + full + ' of ' + lots.length + '.';
+}
+function parkAdd(i, v){
+  var L = lots[i];
+  if (L.parked.length < CAPACITY && L.waiting.length === 0){ L.parked.push(v); log('park', PL[i].n + ': ' + v + ' parked.', 'ok'); }
+  else { L.waiting.push(v); log('park', PL[i].n + ': lot full. ' + v + ' joins the waiting queue.', 'dim'); }
+}
+function parkArrive(i){
+  var inp = $('#pn' + i), v = inp.value.trim();
+  if (!v){ $('#pe' + i).textContent = 'Input cannot be empty.'; inp.focus(); return; }
+  $('#pe' + i).textContent = ''; inp.value = '';
+  parkAdd(i, v);
+  renderPark();
+}
+function parkLeave(i, k){
+  var L = lots[i];
+  if (!L.parked[k]) return;
+  log('park', PL[i].n + ': ' + L.parked[k] + ' leaves.', 'ok');
+  L.parked.splice(k, 1);
+  if (L.waiting.length){
+    var n = L.waiting.shift();
+    L.parked.push(n);
+    log('park', PL[i].n + ': ' + n + ' gets the free spot.', 'ok');
+  }
+  renderPark();
+}
+function parkRandomAll(){
+  PL.forEach(function(p, i){ parkAdd(i, plate()); });
+  renderPark();
+}
+
+/* ---------- reset ---------- */
+function resetAll(sample){
+  cancelRun();
+  lanes = [[], [], []]; pq = []; order = 0; passed = 0;
+  lots = newLots(); blockedE = {}; hist = []; curRoute = []; view = null;
+  logs = { junction:[], gps:[], park:[] };
+  sig.phase = 'red'; sig.t = 0; sig.preempted = false; acc = [0, 0, 0, 0];
+  if (sample){
+    lanes[0] = ['MH01-4521', 'MH02-7788'].map(mkCar);
+    lanes[1] = ['MH04-1290'].map(mkCar);
+    lanes[2] = ['MH03-5516', 'MH12-8890'].map(mkCar);
+    pqPush(3, 'Bus 502'); pqPush(1, 'Ambulance'); pqPush(2, 'Fire truck');
+    seedLots();
+  }
+  ['junction', 'gps', 'park'].forEach(renderLog);
+  renderLanes(); renderSignal(); renderPark();
+  $('#g-from').value = 0; $('#g-to').value = 10;
+  $('#g-state').innerHTML = '<p class="note" style="margin-top:0">Press "Find route" to see the queue or stack at every step.</p>';
+  $('#routebox').textContent = 'No route yet.';
+  if (sample){
+    var res = dijkstra(0, 10);
+    var last = res.steps[res.steps.length - 1];
+    commit(res, 0, 10);
+    view = viewFrom(last, 'dij'); view.cur = -1;
+    $('#g-state').innerHTML = statePanel(last, 'dij');
+  }
+  renderGps();
+}
+
+/* ---------- events ---------- */
+function showTab(name){
+  ['junction', 'gps', 'park'].forEach(function(t){
+    $('#tab-' + t).hidden = (t !== name);
+    $('#t-' + t).setAttribute('aria-selected', t === name ? 'true' : 'false');
+  });
+}
+document.addEventListener('click', function(e){
+  var b = e.target.closest('[data-act]');
+  if (!b || b.disabled) return;
+  var a = b.getAttribute('data-act');
+  var nm = $('#s-name').value.trim();
+  if (a === 'tab') showTab(b.getAttribute('data-tab'));
+  else if (a === 'reset') resetAll(true);
+  else if (a === 'clear') resetAll(false);
+  else if (a === 'sig') toggleSignal();
+  else if (a === 'add-car'){ addCar(nm); $('#s-name').value = ''; }
+  else if (a === 'add-amb') addPriority(1, '');
+  else if (a === 'add-fire') addPriority(2, '');
+  else if (a === 'add-bus'){ addPriority(3, nm); $('#s-name').value = ''; }
+  else if (a === 'add-five'){ for (var i = 0; i < 5; i++) setTimeout(randomVehicle, i * 600); }
+  else if (a === 'g-find') startRoute();
+  else if (a === 'g-skip') finishRun();
+  else if (a === 'g-block') toggleBlock($('#g-road').value);
+  else if (a === 'g-undo') undoRoute();
+  else if (a === 'p-arrive') parkArrive(parseInt(b.getAttribute('data-lot'), 10));
+  else if (a === 'p-leave') parkLeave(parseInt(b.getAttribute('data-lot'), 10), parseInt(b.getAttribute('data-i'), 10));
+  else if (a === 'p-random-all') parkRandomAll();
+});
+$('#map').addEventListener('click', function(e){
+  var t = e.target.closest('[data-edge]');
+  if (t){ $('#g-road').value = t.getAttribute('data-edge'); toggleBlock(t.getAttribute('data-edge')); }
+});
+$('#g-road').addEventListener('change', renderGps);
+$('#g-from').addEventListener('change', renderGps);
+$('#g-to').addEventListener('change', renderGps);
+$('#s-name').addEventListener('keydown', function(e){ if (e.key === 'Enter'){ addCar($('#s-name').value.trim()); $('#s-name').value = ''; } });
+$('#lots').addEventListener('keydown', function(e){
+  if (e.key === 'Enter' && e.target.matches('input[data-lot]')) parkArrive(parseInt(e.target.getAttribute('data-lot'), 10));
+});
+$('#lots').addEventListener('input', function(e){
+  if (e.target.matches('input[data-lot]')) $('#pe' + e.target.getAttribute('data-lot')).textContent = '';
+});
+$('#pre').addEventListener('change', maybePreempt);
+
+initGpsControls();
+buildLots();
+resetAll(true);
+})();
+</script>
+
+</body></html>

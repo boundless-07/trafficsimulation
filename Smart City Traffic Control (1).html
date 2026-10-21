@@ -239,6 +239,10 @@ input::placeholder{color:var(--muted);opacity:.8}
 .lot .err{min-height:0;margin-top:-4px}
 .psum{font:500 14px/1.6 var(--font-mono);margin-bottom:12px}
 
+.cg{display:grid;grid-template-columns:56px 1fr 92px;gap:8px;align-items:center;font:500 12px var(--font-mono);margin-bottom:4px}
+.bar{display:block;height:10px;border-radius:5px;background:var(--surface-2);overflow:hidden}.bar b{display:block;height:100%;transition:width .3s}
+.cg em{font-style:normal;color:var(--muted)}
+.vt{width:100%;border-collapse:collapse;font:500 13px var(--font-mono)}.vt th,.vt td{text-align:right;padding:6px 6px;border-bottom:1px solid var(--line)}.vt th:first-child,.vt td:first-child{text-align:left}.vt .win{color:var(--good);font-weight:600}
 footer{margin-top:28px;color:var(--muted);font-size:13px;max-width:72ch}
 
 @media (max-width:900px){
@@ -279,7 +283,7 @@ footer{margin-top:28px;color:var(--muted);font-size:13px;max-width:72ch}
   <header class="top">
     <div>
       <h1>Smart City Traffic Control</h1>
-      <p>Four one-way lanes, one signal you control, a route finder with twelve locations, and a parking lot at every location, and an incident desk. Every part runs on a queue, a priority queue or a stack.</p>
+      <p>Four one-way lanes, one signal that runs itself (adaptive or fixed timing), a route finder with twelve locations, and a parking lot at every location, and an incident desk. Every part runs on a queue, a priority queue or a stack.</p>
     </div>
     <div class="top-actions">
       <button class="btn" data-act="reset" type="button">Reset sample data</button>
@@ -323,6 +327,7 @@ footer{margin-top:28px;color:var(--muted);font-size:13px;max-width:72ch}
           <div class="lane lane-pri" id="lane4"><div class="exit"></div><div class="stopline"></div><div class="stack" id="stack4"></div></div>
         </div>
         <div class="readouts" id="readouts"></div>
+        <div class="sect" id="cong"></div>
       </div>
 
       <div class="side">
@@ -330,9 +335,11 @@ footer{margin-top:28px;color:var(--muted);font-size:13px;max-width:72ch}
           <p class="dsnote">All four lanes are one-way and lead to one signal. A new car joins whichever of Lanes 1 to 3 has the fewest vehicles. Lane 4 is only for ambulances, fire trucks and buses and works as a priority queue: Ambulance first, then Fire truck, then Bus. When the signal is green, every lane moves forward.</p>
 
           <div class="sect">
-            <h2>Signal</h2>
-            <button class="btn big go" id="b-sig" data-act="sig" type="button">Turn signal green</button>
-            <label class="toggle" style="margin-top:8px"><input type="checkbox" id="pre"> Emergency preemption: an ambulance or fire truck at a red light turns it green</label>
+            <h2>Signal control</h2>
+            <label class="lbl" for="mode">Mode (runs automatically unless set to Manual)</label>
+            <select id="mode"><option value="adaptive" selected>Automatic: adaptive (queue lengths + priority)</option><option value="fixed">Automatic: fixed timing (8s green, 8s red)</option><option value="manual">Manual</option></select>
+            <button class="btn big go" id="b-sig" style="margin-top:10px" data-act="sig" type="button">Turn signal green</button>
+            <label class="toggle" style="margin-top:8px"><input type="checkbox" id="pre" checked> Emergency preemption: an ambulance or fire truck at a red light turns it green</label>
           </div>
 
           <div class="sect">
@@ -350,9 +357,10 @@ footer{margin-top:28px;color:var(--muted);font-size:13px;max-width:72ch}
           <div class="sect">
             <h2>Simulation</h2>
             <div class="btns"><button class="btn" data-act="add-five" type="button">Add 5 random vehicles</button></div>
-            <label class="toggle"><input type="checkbox" id="rand"> Random vehicles keep arriving</label>
+            <label class="toggle"><input type="checkbox" id="rand" checked> Random vehicles keep arriving</label>
           </div>
         </div>
+        <div class="panel"><h2>Simulation and validation</h2><p class="dsnote">Runs the same traffic through a fixed-timing signal and the adaptive signal, then compares them.</p><button class="btn primary" data-act="validate" type="button">Run again with new traffic</button><div id="val-out" style="margin-top:12px"></div></div>
         <div class="panel"><h2>Activity</h2><ol class="log" id="log-junction"></ol></div>
       </div>
     </div>
@@ -490,12 +498,13 @@ var lanes = [[], [], []];        // three regular lanes, each a queue of {id,nam
 var pq = [];                     // Lane 4: priority queue kept in service order {id,name,priority,order}
 var sig = { phase:'red', t:0, preempted:false };
 var acc = [0, 0, 0, 0];
+var clock = 0, ctl = { since:0 }, W = { n:0, sum:0, pn:0, psum:0, maxQ:0 };
 var logs = { junction:[], gps:[], park:[], inc:[] };
 var lots = [];             // one parking lot per location: {parked:[], waiting:[]}
 
-function mkCar(n){ var id = ++uid; return { id:id, name:n, color:CAR_COLORS[id % CAR_COLORS.length] }; }
+function mkCar(n){ var id = ++uid; return { id:id, name:n, t0:clock, color:CAR_COLORS[id % CAR_COLORS.length] }; }
 function pqPush(priority, name){
-  var v = { id:++uid, name:name, priority:priority, order:order++ };
+  var v = { id:++uid, name:name, priority:priority, order:order++, t0:clock };
   var i = -1;
   for (var k = 0; k < pq.length; k++){ if (pq[k].priority > priority){ i = k; break; } }
   if (i < 0) i = pq.length;
@@ -607,13 +616,13 @@ function renderSignal(){
   road.classList.toggle('go', p === 'green');
   road.classList.toggle('amb', p === 'amber');
   var b = $('#b-sig');
-  b.disabled = (p === 'amber');
+  b.disabled = (p === 'amber') || $('#mode').value !== 'manual';
   b.textContent = p === 'red' ? 'Turn signal green' : p === 'green' ? 'Turn signal red' : 'Changing to red';
   b.className = 'btn big ' + (p === 'red' ? 'go' : 'stop');
   $('#banner').hidden = !sig.preempted;
 }
 function setGreen(){
-  sig.phase = 'green'; acc = [600, 450, 300, 150];
+  sig.phase = 'green'; ctl.since = 0; acc = [600, 450, 300, 150];
   log('junction', 'Signal turned green. All lanes move forward.', 'ok');
   renderSignal();
 }
@@ -673,7 +682,7 @@ function releaseLanes(){
     if (acc[i] >= REL && lanes[i].length){
       acc[i] = 0; any = true;
       ghost('stack' + (i + 1));
-      var c = lanes[i].shift(); passed++;
+      var c = lanes[i].shift(); passed++; recWait(c, false);
       log('junction', c.name + ' crosses (Lane ' + (i + 1) + ').', 'ok');
     }
   }
@@ -681,15 +690,108 @@ function releaseLanes(){
   if (acc[3] >= REL && pq.length){
     acc[3] = 0; any = true;
     ghost('stack4');
-    var v = pq.shift(); passed++;
+    var v = pq.shift(); passed++; recWait(v, v.priority <= 2);
     log('junction', v.name + ' crosses (Lane 4)' + (v.priority <= 2 ? '  [EMERGENCY]' : '') + '.', v.priority <= 2 ? 'alert' : 'ok');
   }
   if (any) renderLanes();
 }
 
+/* ---------- adaptive control, shared by the live signal and the validation simulator ---------- */
+var FIX_RED = 8000, FIX_GREEN = 8000, MIN_RED = 2000, MAX_GREEN = 14000;
+function demand(L, P){
+  var s = 0;
+  L.forEach(function(l){ s += l.length; });
+  P.forEach(function(v){ s += v.priority === 1 ? 10 : v.priority === 2 ? 8 : 3; });
+  return s;
+}
+function oldestWait(L, P, clock){
+  var o = 0;
+  L.concat([P]).forEach(function(l){ l.forEach(function(v){ o = Math.max(o, clock - v.t0); }); });
+  return o;
+}
+/* returns 'go' (red -> green), 'stop' (green -> red) or '' */
+function decide(mode, phase, since, L, P, clock){
+  if (mode === 'fixed') return phase === 'red' ? (since >= FIX_RED ? 'go' : '') : (since >= FIX_GREEN ? 'stop' : '');
+  var d = demand(L, P);
+  if (phase === 'red'){
+    if (P.some(function(v){ return v.priority <= 2; })) return 'go';
+    if (d > 0 && since >= MIN_RED && (d >= 3 || oldestWait(L, P, clock) >= 5000)) return 'go';
+    return '';
+  }
+  if (d === 0 && since >= 1500) return 'stop';
+  return since >= MAX_GREEN ? 'stop' : '';
+}
+function mulberry32(a){ return function(){ a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+/* headless simulation: same vehicles and same lanes as the live junction, run faster than real time */
+function sim(mode, seed, mins){
+  var rnd = mulberry32(seed), L = [[], [], []], P = [], phase = 'red', since = 0, amb = 0, acc = [0, 0, 0, 0],
+      clock = 0, nxt = 1500 + rnd() * 1800, end = mins * 60000, st = { n:0, sum:0, pn:0, psum:0, maxQ:0 };
+  function rec(w, em){ st.n++; st.sum += w; if (em){ st.pn++; st.psum += w; } }
+  while (clock < end){
+    clock += TICK; nxt -= TICK;
+    if (nxt <= 0){
+      nxt = 1500 + rnd() * 1800; var r = rnd();
+      if (r < .68){ var b = 0; for (var i = 1; i < 3; i++) if (L[i].length < L[b].length) b = i; L[b].push({ t0:clock }); }
+      else { var k = r < .80 ? 3 : r < .90 ? 1 : 2, v = { priority:k, t0:clock }, ix = -1;
+        for (var q = 0; q < P.length; q++) if (P[q].priority > k){ ix = q; break; }
+        P.splice(ix < 0 ? P.length : ix, 0, v); }
+    }
+    st.maxQ = Math.max(st.maxQ, L[0].length, L[1].length, L[2].length, P.length);
+    if (phase === 'amber'){ amb -= TICK; if (amb <= 0){ phase = 'red'; since = 0; } continue; }
+    since += TICK;
+    var d = decide(mode, phase, since, L, P, clock);
+    if (phase === 'red'){ if (d === 'go'){ phase = 'green'; since = 0; acc = [600, 450, 300, 150]; } continue; }
+    if (d === 'stop'){ phase = 'amber'; amb = AMBER; since = 0; continue; }
+    for (var j = 0; j < 3; j++){ acc[j] += TICK; if (acc[j] >= REL && L[j].length){ acc[j] = 0; rec(clock - L[j].shift().t0, false); } }
+    acc[3] += TICK; if (acc[3] >= REL && P.length){ acc[3] = 0; var pv = P.shift(); rec(clock - pv.t0, pv.priority <= 2); }
+  }
+  return { avg: st.n ? st.sum / st.n / 1000 : 0, pavg: st.pn ? st.psum / st.pn / 1000 : 0, maxQ: st.maxQ, thru: st.n };
+}
+
+/* ---------- live congestion panel and validation ---------- */
+function lvl(n){ return n <= 2 ? ['Low', 'good'] : n <= 4 ? ['Medium', 'warn'] : ['High', 'bad']; }
+function renderCongestion(){
+  var h = '<h3>Live congestion data</h3>', i, n, w, l;
+  for (i = 0; i < 4; i++){
+    n = i < 3 ? lanes[i].length : pq.length;
+    w = i < 3 ? n : pq.reduce(function(s, v){ return s + (v.priority <= 2 ? 3 : 1); }, 0);
+    l = lvl(w);
+    h += '<div class="cg"><span>Lane ' + (i + 1) + '</span><i class="bar"><b style="width:' + Math.min(100, n * 14) + '%;background:var(--' + l[1] + ')"></b></i><em>' + n + ' &middot; ' + l[0] + '</em></div>';
+  }
+  var mq = Math.max(lanes[0].length, lanes[1].length, lanes[2].length, pq.length);
+  h += '<div class="readout"><b>Demand score</b> ' + demand(lanes, pq) + ' (car 1, bus 3, fire truck 8, ambulance 10) &middot; <b>Est. clear time</b> ' + (mq * REL / 1000).toFixed(1) + 's &middot; <b>Time in phase</b> ' + (ctl.since / 1000).toFixed(1) + 's</div>';
+  h += '<div class="readout"><b>Live results</b> avg wait ' + (W.n ? W.sum / W.n / 1000 : 0).toFixed(1) + 's &middot; ambulance/fire wait ' + (W.pn ? W.psum / W.pn / 1000 : 0).toFixed(1) + 's &middot; peak queue ' + W.maxQ + '</div>';
+  $('#cong').innerHTML = h;
+}
+var vseed = 7;
+function runValidation(fresh){
+  if (fresh) vseed = 1 + Math.floor(Math.random() * 9999);
+  var f = sim('fixed', vseed, 10), a = sim('adaptive', vseed, 10);
+  function better(x, y){ return x > 0 ? Math.round((x - y) / x * 100) : 0; }
+  function row(lbl, x, y, u, gain){ return '<tr><td>' + lbl + '</td><td>' + (u ? x.toFixed(1) : x) + u + '</td><td>' + (u ? y.toFixed(1) : y) + u + '</td><td class="' + (gain > 0 ? 'win' : '') + '">' + (gain > 0 ? '+' : '') + gain + '%</td></tr>'; }
+  var tg = f.thru ? Math.round((a.thru - f.thru) / f.thru * 100) : 0;
+  $('#val-out').innerHTML = '<table class="vt"><thead><tr><th></th><th>Fixed timing</th><th>Adaptive</th><th>Gain</th></tr></thead><tbody>'
+    + row('Avg wait', f.avg, a.avg, 's', better(f.avg, a.avg))
+    + row('Ambulance/fire wait', f.pavg, a.pavg, 's', better(f.pavg, a.pavg))
+    + row('Peak queue', f.maxQ, a.maxQ, '', better(f.maxQ, a.maxQ))
+    + row('Vehicles passed', f.thru, a.thru, '', tg) + '</tbody></table>'
+    + '<p class="hint">Same traffic (seed ' + vseed + '), 10 simulated minutes. Fixed timing: 8s green, 8s red, no preemption. Adaptive: green when demand builds or a priority vehicle arrives, red when the queues clear.</p>';
+}
+
 /* ---------- timer ---------- */
 var arrAcc = 0, arrNext = 2200;
+function recWait(v, em){ var w = clock - v.t0; W.n++; W.sum += w; if (em){ W.pn++; W.psum += w; } }
 setInterval(function(){
+  clock += TICK;
+  W.maxQ = Math.max(W.maxQ, lanes[0].length, lanes[1].length, lanes[2].length, pq.length);
+  var mode = $('#mode').value;
+  if (mode !== 'manual' && !sig.preempted && (sig.phase === 'red' || sig.phase === 'green')){
+    ctl.since += TICK;
+    var dc = decide(mode, sig.phase, ctl.since, lanes, pq, clock);
+    if (sig.phase === 'red' && dc === 'go'){ setGreen(); log('junction', (mode === 'fixed' ? 'Fixed timing' : 'Adaptive') + ': green, demand score ' + demand(lanes, pq) + '.', 'ok'); }
+    else if (sig.phase === 'green' && dc === 'stop'){ startAmber(); ctl.since = 0; log('junction', (mode === 'fixed' ? 'Fixed timing' : 'Adaptive') + ': ' + (demand(lanes, pq) === 0 ? 'queues cleared' : 'green time used up') + ', changing to red.', 'ok'); }
+  }
+  if (clock % 500 === 0) renderCongestion();
   if (sig.phase === 'green'){
     releaseLanes();
     if (sig.preempted && !emergencyWaiting()){
@@ -699,7 +801,7 @@ setInterval(function(){
     }
   } else if (sig.phase === 'amber'){
     sig.t -= TICK;
-    if (sig.t <= 0){ sig.phase = 'red'; renderSignal(); maybePreempt(); }
+    if (sig.t <= 0){ sig.phase = 'red'; ctl.since = 0; renderSignal(); maybePreempt(); }
   }
   if ($('#rand').checked){
     arrAcc += TICK;
@@ -1117,7 +1219,7 @@ function resetAll(sample){
   lots = newLots(); blockedE = {}; hist = []; curRoute = []; view = null;
   logs = { junction:[], gps:[], park:[], inc:[] };
   iq = []; idone = []; iunits = [null, null, null]; iid = 0; $('#i-err').textContent = '';
-  sig.phase = 'red'; sig.t = 0; sig.preempted = false; acc = [0, 0, 0, 0];
+  sig.phase = 'red'; sig.t = 0; sig.preempted = false; acc = [0, 0, 0, 0]; clock = 0; ctl.since = 0; W = { n:0, sum:0, pn:0, psum:0, maxQ:0 };
   if (sample){
     lanes[0] = ['MH01-4521', 'MH02-7788'].map(mkCar);
     lanes[1] = ['MH04-1290'].map(mkCar);
@@ -1126,7 +1228,7 @@ function resetAll(sample){
     seedLots(); incSeed();
   }
   ['junction', 'gps', 'park', 'inc'].forEach(renderLog);
-  renderLanes(); renderSignal(); renderPark(); renderInc();
+  renderLanes(); renderSignal(); renderPark(); renderInc(); renderCongestion();
   $('#g-from').value = 0; $('#g-to').value = 10;
   $('#g-state').innerHTML = '<p class="note" style="margin-top:0">Press "Find route" to see the queue or stack at every step.</p>';
   $('#routebox').textContent = 'No route yet.';
@@ -1161,6 +1263,7 @@ document.addEventListener('click', function(e){
   else if (a === 'add-fire') addPriority(2, '');
   else if (a === 'add-bus'){ addPriority(3, nm); $('#s-name').value = ''; }
   else if (a === 'add-five'){ for (var i = 0; i < 5; i++) setTimeout(randomVehicle, i * 600); }
+  else if (a === 'validate') runValidation(true);
   else if (a === 'g-find') startRoute();
   else if (a === 'g-skip') finishRun();
   else if (a === 'g-block') toggleBlock($('#g-road').value);
@@ -1190,11 +1293,13 @@ $('#lots').addEventListener('input', function(e){
   if (e.target.matches('input[data-lot]')) $('#pe' + e.target.getAttribute('data-lot')).textContent = '';
 });
 $('#pre').addEventListener('change', maybePreempt);
+$('#mode').addEventListener('change', function(){ ctl.since = 0; renderSignal(); renderCongestion(); log('junction', 'Control mode: ' + $('#mode').selectedOptions[0].text + '.', 'ok'); });
 
 initGpsControls();
 incInit();
 buildLots();
 resetAll(true);
+runValidation(false);
 })();
 </script>
 

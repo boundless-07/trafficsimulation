@@ -715,7 +715,7 @@ function decide(mode, phase, since, L, P, clock){
   var d = demand(L, P);
   if (phase === 'red'){
     if (P.some(function(v){ return v.priority <= 2; })) return 'go';
-    if (d > 0 && since >= MIN_RED && (d >= 3 || oldestWait(L, P, clock) >= 5000)) return 'go';
+    if (d > 0 && since >= MIN_RED && (d >= 10 || oldestWait(L, P, clock) >= 20000)) return 'go';
     return '';
   }
   if (d === 0 && since >= 1500) return 'stop';
